@@ -113,4 +113,34 @@ class SqlitePlatform extends SQLPlatform {
 
 		return '(' . $this->selectSQLText( $table, $fld, $conds, null, [], $join_conds ) . ')';
 	}
+
+	protected function makeInsertNonConflictingVerbAndOptions() {
+		return [ 'INSERT OR IGNORE INTO', '' ];
+	}
+
+	/**
+	 * @param array $options
+	 * @return array
+	 */
+	protected function makeUpdateOptionsArray( $options ) {
+		$options = parent::makeUpdateOptionsArray( $options );
+		$options = $this->rewriteIgnoreKeyword( $options );
+
+		return $options;
+	}
+
+	/**
+	 * @param array $options
+	 * @return array
+	 */
+	private function rewriteIgnoreKeyword( $options ) {
+		# SQLite uses OR IGNORE not just IGNORE
+		foreach ( $options as $k => $v ) {
+			if ( $v == 'IGNORE' ) {
+				$options[$k] = 'OR IGNORE';
+			}
+		}
+
+		return $options;
+	}
 }

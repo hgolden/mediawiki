@@ -146,9 +146,6 @@ interface IDatabase extends ISQLPlatform, DbQuoter {
 	/** @var string Unknown replication topology role */
 	public const ROLE_UNKNOWN = 'unknown';
 
-	/** @var string Unconditional update/delete of whole table */
-	public const ALL_ROWS = '*';
-
 	/**
 	 * Get a human-readable string describing the current software version
 	 *
@@ -480,6 +477,10 @@ interface IDatabase extends ISQLPlatform, DbQuoter {
 	/**
 	 * Create an empty SelectQueryBuilder which can be used to run queries
 	 * against this connection.
+	 *
+	 * @note A new query builder must be created per query. Query builders
+	 *   should not be reused since this uses a fluent interface and the state of
+	 *   the builder changes during the query which may cause unexpected results.
 	 *
 	 * @return SelectQueryBuilder
 	 */

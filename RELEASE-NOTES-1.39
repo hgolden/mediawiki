@@ -74,6 +74,7 @@ For notes on 1.38.x and older releases, see HISTORY.
   unnamed template arguments.  Defining [[Template:=]] to expand to something
   other than `=` has been deprecated since 1.36, with affected pages put into
   a special tracking category for migration.
+* (T284020) Bot passwords are now supported when using the REST API.
 * …
 
 === New developer features in 1.39 ===
@@ -149,6 +150,9 @@ because of Phabricator reports.
   you mean to use it as "Media:", these need to be replaced to "Media:".
 * (T309866) Some namespace translations were updated for Kyrgyz (ky). The old
   ones are retained as aliases for backwards compatibility.
+* (T117845) Started the renaming of the language codes for Serbian from sr-ec
+  and sr-el to sr-cyrl and sr-latn.
+* …
 
 === Breaking changes in 1.39 ===
 * Basic non-JavaScript (Grade C) support has been dropped for Internet Explorer
@@ -347,6 +351,8 @@ because of Phabricator reports.
   UnblockUser instead.
 * wfLocalFile() and wfFindFile(), deprecated in 1.34, have been removed.
 * Maintenance script resetUserTokens.php, deprecated in 1.27, has been removed.
+* Database::doInsert() has been removed without deprecation as it's not used
+  outside core. Users should override SqlPlatform::insertSqlText() instead.
 * …
 
 === Deprecations in 1.39 ===

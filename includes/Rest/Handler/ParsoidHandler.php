@@ -51,6 +51,7 @@ use Wikimedia\Parsoid\Core\PageBundle;
 use Wikimedia\Parsoid\Core\ResourceLimitExceededException;
 use Wikimedia\Parsoid\Core\SelserData;
 use Wikimedia\Parsoid\DOM\Document;
+use Wikimedia\Parsoid\DOM\Element;
 use Wikimedia\Parsoid\Parsoid;
 use Wikimedia\Parsoid\Utils\ContentUtils;
 use Wikimedia\Parsoid\Utils\DOMCompat;
@@ -119,6 +120,104 @@ abstract class ParsoidHandler extends Handler {
 		$this->dataAccess = $dataAccess;
 		$this->extensionRegistry = ExtensionRegistry::getInstance();
 		$this->metrics = $siteConfig->metrics();
+	}
+
+	/**
+	 * Get selected serialization data from old HTML.
+	 *
+	 * @param HTMLTransformInput $input
+	 * @param PageBundle|null $origPb
+	 * @param string $inputContentVersion
+	 * @param Document $doc
+	 * @param Element|null $oldBody
+	 * @param PageConfig $pageConfig
+	 *
+	 * @return SelserData|null
+	 * @throws HttpException
+	 */
+	private function getSelserData(
+		HTMLTransformInput $input,
+		?PageBundle $origPb,
+		string $inputContentVersion,
+		Document $doc,
+		?Element $oldBody,
+		PageConfig $pageConfig
+	): ?SelserData {
+		$oldhtml = null;
+		if ( $input->inputIsPageBundle() ) {
+			// Apply the pagebundle to the parsed doc.  This supports the
+			// simple edit scenarios where data-mw might not necessarily
+			// have been retrieved.
+			if ( !$origPb ) {
+				$origPb = $input->getOriginalPageBundle();
+			}
+
+			// Verify that the top-level parsoid object either doesn't contain
+			// offsetType, or that it matches the conversion that has been
+			// explicitly requested.
+			if ( isset( $origPb->parsoid['offsetType'] ) ) {
+				$offsetType = $input->getEnvironmentOffsetType();
+				// @phan-suppress-next-line PhanTypeArraySuspiciousNullable
+				$origOffsetType = $origPb->parsoid['offsetType'];
+				if ( $origOffsetType !== $offsetType ) {
+					throw new HttpException( 'DSR offsetType mismatch: ' . $origOffsetType . ' vs ' . $offsetType,
+						406 );
+				}
+			}
+
+			$pb = $origPb;
+			// However, if a modified data-mw was provided,
+			// original data-mw is omitted to avoid losing deletions.
+			if ( $input->hasModifiedDataMW() && Semver::satisfies( $inputContentVersion,
+					'^999.0.0' ) ) {
+				// Don't modify `origPb`, it's used below.
+				$pb = new PageBundle( '',
+					$pb->parsoid,
+					[ 'ids' => [] ] );
+			}
+			$this->validatePb( $pb,
+				$inputContentVersion );
+			PageBundle::apply( $doc,
+				$pb );
+		}
+
+		// If we got original html, parse it
+		if ( $input->hasOriginalHtml() ) {
+			if ( !$oldBody ) {
+				$oldBody = DOMCompat::getBody( $this->parseHTML( $input->getOriginalHtml() ) );
+			}
+			if ( $input->inputIsPageBundle() && $origPb !== null ) {
+				$this->validatePb( $origPb,
+					$inputContentVersion );
+				// @phan-suppress-next-line PhanTypeMismatchArgumentSuperType
+				PageBundle::apply( $oldBody->ownerDocument,
+					$origPb );
+			}
+			// @phan-suppress-next-line PhanTypeMismatchArgumentNullable
+			$oldhtml = ContentUtils::toXML( $oldBody );
+		}
+
+		// As per https://www.mediawiki.org/wiki/Parsoid/API#v1_API_entry_points
+		//   "Both it and the oldid parameter are needed for
+		//    clean round-tripping of HTML retrieved earlier with"
+		// So, no oldid => no selser
+		$hasOldId = ( $input->getOriginalRevisionId() !== null );
+
+		if ( $hasOldId && !empty( $this->parsoidSettings['useSelser'] ) ) {
+			if ( !$pageConfig->getRevisionContent() ) {
+				throw new HttpException( 'Could not find previous revision. Has the page been locked / deleted?',
+					409 );
+			}
+
+			// FIXME: T234548/T234549 - $pageConfig->getPageMainContent() is deprecated:
+			// should use $env->topFrame->getSrcText()
+			$selserData = new SelserData( $pageConfig->getPageMainContent(),
+				$oldhtml );
+		} else {
+			$selserData = null;
+		}
+
+		return $selserData;
 	}
 
 	/**
@@ -269,6 +368,31 @@ abstract class ParsoidHandler extends Handler {
 		return $this->requestAttributes;
 	}
 
+	protected function getHTMLTransformInput( array $attribs, string $html ) {
+		$doc = $this->parseHTML( $html, true );
+
+		$input = new HTMLTransformInput( $doc );
+		$input->setOptions( $attribs['opts'] ?? [] );
+		$input->setInputFormat( $attribs['opts']['from'] );
+
+		if ( isset( $attribs['oldid'] ) ) {
+			$input->setOriginalRevisionId( $attribs['oldid'] );
+		}
+
+		if ( isset( $attribs['opts']['data-mw']['body'] ) ) {
+			$input->setModifiedDataMW( $attribs['opts']['data-mw']['body'] );
+		}
+
+		if ( !empty( $attribs['opts']['original'] ) ) {
+			// XXX: maybe split this up into setOriginalHTML, etc?
+			//      We could pass the original HTML already parsed as well.
+			//      We could also set a PageBundle object.
+			$input->setOriginalData( $attribs['opts']['original'] );
+		}
+
+		return $input;
+	}
+
 	/**
 	 * FIXME: Combine with ParsoidFormatHelper::parseContentTypeHeader
 	 */
@@ -389,6 +513,8 @@ abstract class ParsoidHandler extends Handler {
 	/**
 	 * Redirect to another Parsoid URL (e.g. canonization)
 	 *
+	 * @stable to override
+	 *
 	 * @param string $path Target URL
 	 * @param array $pathParams Path parameters to inject into path
 	 * @param array $queryParams Query parameters
@@ -398,32 +524,41 @@ abstract class ParsoidHandler extends Handler {
 	protected function createRedirectResponse(
 		string $path, array $pathParams = [], array $queryParams = []
 	): Response {
-		// FIXME: We should be using $this->getRouteUrl here. But that uses the CanonicalServer
-		//        setting as the base URL, which is incorrect when redirecting to private
-		//        endpoints. See T311867.
-		global $wgRestPath;
-		$path = wfExpandUrl( "$wgRestPath$path", PROTO_CURRENT );
-
-		foreach ( $pathParams as $param => $value ) {
-			// NOTE: we use rawurlencode here, since execute() uses rawurldecode().
-			// Spaces in path params must be encoded to %20 (not +).
-			$path = str_replace( '{' . $param . '}', rawurlencode( $value ), $path );
-		}
-
-		// XXX: this should not be necessary in the REST entry point
+		// FIXME this should not be necessary in the REST entry point
 		unset( $queryParams['title'] );
 
-		if ( $queryParams ) {
-			$path .= ( strpos( $path, '?' ) === false ? '?' : '&' )
-				. http_build_query( $queryParams, '', '&', PHP_QUERY_RFC3986 );
-		}
+		$url = $this->getRedirectRouteUrl( $path, $pathParams, $queryParams );
+
 		if ( $this->getRequest()->getMethod() === 'POST' ) {
-			$response = $this->getResponseFactory()->createTemporaryRedirect( $path );
+			// 307 response
+			$response = $this->getResponseFactory()->createTemporaryRedirect( $url );
 		} else {
-			$response = $this->getResponseFactory()->createLegacyTemporaryRedirect( $path );
+			// 302 response
+			$response = $this->getResponseFactory()->createLegacyTemporaryRedirect( $url );
 		}
 		$response->setHeader( 'Cache-Control', 'private,no-cache,s-maxage=0' );
 		return $response;
+	}
+
+	/**
+	 * Returns the target URL for a redirect to the given path and parameters.
+	 * This exists so subclasses can override it to control whether the redirect
+	 * should go to a private or to a public URL.
+	 *
+	 * @see Router::getRouteUrl()
+	 *
+	 * @stable to override
+	 *
+	 * @param string $path
+	 * @param array $pathParams
+	 * @param array $queryParams
+	 *
+	 * @return string
+	 */
+	protected function getRedirectRouteUrl(
+		string $path, array $pathParams = [], array $queryParams = []
+	) {
+		return $this->getRouter()->getRouteUrl( $path, $pathParams, $queryParams );
 	}
 
 	/**
@@ -476,6 +611,8 @@ abstract class ParsoidHandler extends Handler {
 	 * This is done in the parsoid extension, for backwards compatibility
 	 * with the old endpoint URLs.
 	 *
+	 * @stable to override
+	 *
 	 * @param string $format The format the endpoint is expected to return.
 	 *
 	 * @return string
@@ -489,6 +626,8 @@ abstract class ParsoidHandler extends Handler {
 	 *
 	 * This is done in the parsoid extension, for backwards compatibility
 	 * with the old endpoint URLs.
+	 *
+	 * @stable to override
 	 *
 	 * @param string $format The format the endpoint is expected to return.
 	 *
@@ -506,6 +645,8 @@ abstract class ParsoidHandler extends Handler {
 	 *
 	 * This is done in the parsoid extension, for backwards compatibility
 	 * with the old endpoint URLs.
+	 *
+	 * @stable to override
 	 *
 	 * @param string $format The format the endpoint is expected to return.
 	 *
@@ -779,37 +920,50 @@ abstract class ParsoidHandler extends Handler {
 	}
 
 	/**
-	 * HTML -> wikitext helper.
-	 *
 	 * @param PageConfig $pageConfig
-	 * @param array $attribs Request attributes from getRequestAttributes()
-	 * @param string $html HTML to transform
+	 * @param array $attribs Attributes gotten from requests
+	 * @param string $html Original HTML
+	 *
 	 * @return Response
+	 * @throws HttpException
 	 */
 	protected function html2wt(
 		PageConfig $pageConfig, array $attribs, string $html
 	) {
-		$request = $this->getRequest();
-		$opts = $attribs['opts'];
-		$envOptions = $attribs['envOptions'];
+		try {
+			$input = $this->getHTMLTransformInput( $attribs, $html );
+			$wikitext = $this->transformHtmlToWikitext(
+				$pageConfig,
+				$input
+			);
+
+			$response = $this->getResponseFactory()->create();
+			ParsoidFormatHelper::setContentType( $response, ParsoidFormatHelper::FORMAT_WIKITEXT );
+			$response->getBody()->write( $wikitext );
+
+			return $response;
+		} catch ( ClientError $e ) {
+			throw new HttpException( $e->getMessage(), 400 );
+		}
+	}
+
+	protected function transformHtmlToWikitext(
+		PageConfig $pageConfig,
+		HTMLTransformInput $input
+	): string {
 		$metrics = $this->metrics;
 
 		// Performance Timing options
 		$timing = Timing::start( $metrics );
 
-		try {
-			$doc = $this->parseHTML( $html, true );
-		} catch ( ClientError $e ) {
-			throw new HttpException( $e->getMessage(), 400 );
-		}
+		$doc = $input->getModifiedDocument();
 
 		// FIXME: Should perhaps be strlen instead
-		$htmlSize = mb_strlen( $html );
+		$htmlSize = mb_strlen( $input->getOriginalHtml() );
 
 		// Send input size to statsd/Graphite
 		$metrics->timing( 'html2wt.size.input', $htmlSize );
 
-		$original = $opts['original'] ?? null;
 		$oldBody = null;
 		$origPb = null;
 
@@ -817,54 +971,46 @@ abstract class ParsoidHandler extends Handler {
 		$vEdited = DOMUtils::extractInlinedContentVersion( $doc );
 
 		// Check for version mismatches between original & edited doc
-		if ( !isset( $original['html'] ) ) {
-			$envOptions['inputContentVersion'] = $vEdited ?? Parsoid::defaultHTMLVersion();
+		if ( !$input->hasOriginalHtml() ) {
+			$inputContentVersion = $vEdited;
 		} else {
-			$vOriginal = ParsoidFormatHelper::parseContentTypeHeader(
-				$original['html']['headers']['content-type'] ?? '' );
-			if ( $vOriginal === null ) {
-				throw new HttpException(
-					'Content-type of original html is missing.', 400
-				);
-			}
+			$vOriginal = $input->getOriginalSchemaVersion();
 			if ( $vEdited === null ) {
 				// If version of edited doc is unavailable we assume
 				// the edited doc is derived from the original doc.
 				// No downgrade necessary
-				$envOptions['inputContentVersion'] = $vOriginal;
+				$inputContentVersion = $vOriginal;
 			} elseif ( $vEdited === $vOriginal ) {
 				// No downgrade necessary
-				$envOptions['inputContentVersion'] = $vOriginal;
+				$inputContentVersion = $vOriginal;
 			} else {
-				$envOptions['inputContentVersion'] = $vEdited;
+				$inputContentVersion = $vEdited;
 				// We need to downgrade the original to match the edited doc's version.
 				$downgrade = Parsoid::findDowngrade( $vOriginal, $vEdited );
 				// Downgrades are only for pagebundle
-				if ( $downgrade && $opts['from'] === ParsoidFormatHelper::FORMAT_PAGEBUNDLE ) {
+				if ( $downgrade && $input->inputIsPageBundle() ) {
 					$metrics->increment(
 						"downgrade.from.{$downgrade['from']}.to.{$downgrade['to']}"
 					);
-					$origPb = new PageBundle(
-						$original['html']['body'],
-						$original['data-parsoid']['body'] ?? null,
-						$original['data-mw']['body'] ?? null
-					);
-					$this->validatePb( $origPb, $vOriginal );
+					$origPb = $input->getOriginalPageBundle();
 					$downgradeTiming = Timing::start( $metrics );
 					Parsoid::downgrade( $downgrade, $origPb );
 					$downgradeTiming->end( 'downgrade.time' );
 					$oldBody = DOMCompat::getBody( $this->parseHTML( $origPb->html ) );
 				} else {
-					throw new HttpException(
+					throw new ClientError(
 						"Modified ({$vEdited}) and original ({$vOriginal}) html are of "
-						. 'different type, and no path to downgrade.', 400
+						. 'different type, and no path to downgrade.'
 					);
 				}
 			}
 		}
 
+		// Default to Parsoid's HTML version if not specified
+		$inputContentVersion = $inputContentVersion ?? Parsoid::defaultHTMLVersion();
+
 		$metrics->increment(
-			'html2wt.original.version.' . $envOptions['inputContentVersion']
+			'html2wt.original.version.' . $inputContentVersion
 		);
 		if ( !$vEdited ) {
 			$metrics->increment( 'html2wt.original.version.notinline' );
@@ -874,91 +1020,22 @@ abstract class ParsoidHandler extends Handler {
 		// existing inline data-mw.  But, no data-parsoid application, since
 		// that's internal, we only expect to find it in its original,
 		// unmodified form.
-		if ( $opts['from'] === ParsoidFormatHelper::FORMAT_PAGEBUNDLE && isset( $opts['data-mw'] )
-			&& Semver::satisfies( $envOptions['inputContentVersion'], '^999.0.0' )
+		if ( $input->inputIsPageBundle() && $input->hasModifiedDataMW()
+			&& Semver::satisfies( $inputContentVersion, '^999.0.0' )
 		) {
 			// `opts` isn't a revision, but we'll find a `data-mw` there.
-			$pb = new PageBundle( '',
-				[ 'ids' => [] ],  // So it validates
-				$opts['data-mw']['body'] ?? null );
-			$this->validatePb( $pb, $envOptions['inputContentVersion'] );
+			$pb = $input->getModifiedPageBundle( $inputContentVersion );
 			PageBundle::apply( $doc, $pb );
 		}
 
-		$oldhtml = null;
-
-		if ( $original ) {
-			if ( $opts['from'] === ParsoidFormatHelper::FORMAT_PAGEBUNDLE ) {
-				// Apply the pagebundle to the parsed doc.  This supports the
-				// simple edit scenarios where data-mw might not necessarily
-				// have been retrieved.
-				if ( !$origPb ) {
-					$origPb = new PageBundle( '', $original['data-parsoid']['body'] ?? null,
-						$original['data-mw']['body'] ?? null );
-				}
-
-				// Verify that the top-level parsoid object either doesn't contain
-				// offsetType, or that it matches the conversion that has been
-				// explicitly requested.
-				if ( isset( $origPb->parsoid['offsetType'] ) ) {
-					$offsetType = $envOptions['offsetType'] ?? 'byte';
-					// @phan-suppress-next-line PhanTypeArraySuspiciousNullable
-					$origOffsetType = $origPb->parsoid['offsetType'];
-					if ( $origOffsetType !== $offsetType ) {
-						throw new HttpException(
-							'DSR offsetType mismatch: ' .
-							$origOffsetType . ' vs ' . $offsetType, 406
-						);
-					}
-				}
-
-				$pb = $origPb;
-				// However, if a modified data-mw was provided,
-				// original data-mw is omitted to avoid losing deletions.
-				if ( isset( $opts['data-mw'] )
-					&& Semver::satisfies( $envOptions['inputContentVersion'], '^999.0.0' )
-				) {
-					// Don't modify `origPb`, it's used below.
-					$pb = new PageBundle( '', $pb->parsoid, [ 'ids' => [] ] );
-				}
-				$this->validatePb( $pb, $envOptions['inputContentVersion'] );
-				PageBundle::apply( $doc, $pb );
-			}
-
-			// If we got original html, parse it
-			if ( isset( $original['html'] ) ) {
-				if ( !$oldBody ) {
-					$oldBody = DOMCompat::getBody( $this->parseHTML( $original['html']['body'] ) );
-				}
-				if ( $opts['from'] === ParsoidFormatHelper::FORMAT_PAGEBUNDLE && $origPb !== null ) {
-					$this->validatePb( $origPb, $envOptions['inputContentVersion'] );
-					// @phan-suppress-next-line PhanTypeMismatchArgumentSuperType
-					PageBundle::apply( $oldBody->ownerDocument, $origPb );
-				}
-				// @phan-suppress-next-line PhanTypeMismatchArgumentNullable
-				$oldhtml = ContentUtils::toXML( $oldBody );
-			}
-		}
-
-		// As per https://www.mediawiki.org/wiki/Parsoid/API#v1_API_entry_points
-		//   "Both it and the oldid parameter are needed for
-		//    clean round-tripping of HTML retrieved earlier with"
-		// So, no oldid => no selser
-		$hasOldId = ( $attribs['oldid'] !== null );
-
-		if ( $hasOldId && !empty( $this->parsoidSettings['useSelser'] ) ) {
-			if ( !$pageConfig->getRevisionContent() ) {
-				throw new HttpException(
-					'Could not find previous revision. Has the page been locked / deleted?', 409
-				);
-			}
-
-			// FIXME: T234548/T234549 - $pageConfig->getPageMainContent() is deprecated:
-			// should use $env->topFrame->getSrcText()
-			$selserData = new SelserData( $pageConfig->getPageMainContent(), $oldhtml );
-		} else {
-			$selserData = null;
-		}
+		$selserData = $this->getSelserData(
+			$input,
+			$origPb,
+			$inputContentVersion,
+			$doc,
+			$oldBody,
+			$pageConfig
+		);
 
 		$parsoid = $this->newParsoid();
 
@@ -966,9 +1043,9 @@ abstract class ParsoidHandler extends Handler {
 
 		try {
 			$wikitext = $parsoid->dom2wikitext( $pageConfig, $doc, [
-				'inputContentVersion' => $envOptions['inputContentVersion'],
-				'offsetType' => $envOptions['offsetType'],
-				'contentmodel' => $opts['contentmodel'] ?? null,
+				'inputContentVersion' => $inputContentVersion,
+				'offsetType' => $input->getEnvironmentOffsetType(),
+				'contentmodel' => $input->getContentModel(),
 				'htmlSize' => $htmlSize,
 			], $selserData );
 		} catch ( ClientError $e ) {
@@ -977,16 +1054,13 @@ abstract class ParsoidHandler extends Handler {
 			throw new HttpException( $e->getMessage(), 413 );
 		}
 
-		if ( $html ) {  // Avoid division by zero
+		if ( $input->getOriginalHtml() ) {  // Avoid division by zero
 			$total = $timing->end( 'html2wt.total' );
 			$metrics->timing( 'html2wt.size.output', strlen( $wikitext ) );
-			$metrics->timing( 'html2wt.timePerInputKB', $total * 1024 / strlen( $html ) );
+			$metrics->timing( 'html2wt.timePerInputKB', $total * 1024 / strlen( $input->getOriginalHtml() ) );
 		}
 
-		$response = $this->getResponseFactory()->create();
-		ParsoidFormatHelper::setContentType( $response, ParsoidFormatHelper::FORMAT_WIKITEXT );
-		$response->getBody()->write( $wikitext );
-		return $response;
+		return $wikitext;
 	}
 
 	/**

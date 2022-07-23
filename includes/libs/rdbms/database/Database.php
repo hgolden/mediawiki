@@ -2202,21 +2202,6 @@ abstract class Database implements IDatabase, IMaintainableDatabase, LoggerAware
 	}
 
 	/**
-	 * @param string|array $options
-	 * @return array Combination option/value map and boolean option list
-	 * @since 1.35
-	 */
-	final protected function normalizeOptions( $options ) {
-		if ( is_array( $options ) ) {
-			return $options;
-		} elseif ( is_string( $options ) ) {
-			return ( $options === '' ) ? [] : [ $options ];
-		} else {
-			throw new DBUnexpectedError( $this, __METHOD__ . ': expected string or array' );
-		}
-	}
-
-	/**
 	 * @param array<int,array> $rows Normalized list of rows to insert
 	 * @param string[] $identityKey Columns of the (unique) identity key to UPSERT upon
 	 * @return bool Whether all the rows have NULL/absent values for all identity key columns
@@ -2289,22 +2274,6 @@ abstract class Database implements IDatabase, IMaintainableDatabase, LoggerAware
 				}
 			}
 		}
-	}
-
-	/**
-	 * @param string $option Query option flag (e.g. "IGNORE" or "FOR UPDATE")
-	 * @param array $options Combination option/value map and boolean option list
-	 * @return bool Whether the option appears as an integer-keyed value in the options
-	 * @since 1.35
-	 */
-	final protected function isFlagInOptions( $option, array $options ) {
-		foreach ( array_keys( $options, $option, true ) as $k ) {
-			if ( is_int( $k ) ) {
-				return true;
-			}
-		}
-
-		return false;
 	}
 
 	/**
@@ -2388,27 +2357,11 @@ abstract class Database implements IDatabase, IMaintainableDatabase, LoggerAware
 		if ( $this->isFlagInOptions( 'IGNORE', $options ) ) {
 			$this->doInsertNonConflicting( $table, $rows, $fname );
 		} else {
-			$this->doInsert( $table, $rows, $fname );
+			$sql = $this->platform->insertSqlText( $table, $rows );
+			$this->query( $sql, $fname, self::QUERY_CHANGE_ROWS );
 		}
 
 		return true;
-	}
-
-	/**
-	 * @see Database::insert()
-	 * @stable to override
-	 * @param string $table
-	 * @param array $rows Non-empty list of rows
-	 * @param string $fname
-	 * @since 1.35
-	 */
-	protected function doInsert( $table, array $rows, $fname ) {
-		$encTable = $this->tableName( $table );
-		list( $sqlColumns, $sqlTuples ) = $this->makeInsertLists( $rows );
-
-		$sql = "INSERT INTO $encTable ($sqlColumns) VALUES $sqlTuples";
-
-		$this->query( $sql, $fname, self::QUERY_CHANGE_ROWS );
 	}
 
 	/**
@@ -2420,142 +2373,15 @@ abstract class Database implements IDatabase, IMaintainableDatabase, LoggerAware
 	 * @since 1.35
 	 */
 	protected function doInsertNonConflicting( $table, array $rows, $fname ) {
-		$encTable = $this->tableName( $table );
-		list( $sqlColumns, $sqlTuples ) = $this->makeInsertLists( $rows );
-		list( $sqlVerb, $sqlOpts ) = $this->makeInsertNonConflictingVerbAndOptions();
-
-		$sql = rtrim( "$sqlVerb $encTable ($sqlColumns) VALUES $sqlTuples $sqlOpts" );
-
+		$sql = $this->platform->insertNonConflictingSqlText( $table, $rows );
 		$this->query( $sql, $fname, self::QUERY_CHANGE_ROWS );
-	}
-
-	/**
-	 * @stable to override
-	 * @return string[] ("INSERT"-style SQL verb, "ON CONFLICT"-style clause or "")
-	 * @since 1.35
-	 */
-	protected function makeInsertNonConflictingVerbAndOptions() {
-		return [ 'INSERT IGNORE INTO', '' ];
-	}
-
-	/**
-	 * Make SQL lists of columns, row tuples, and column aliases for INSERT/VALUES expressions
-	 *
-	 * The tuple column order is that of the columns of the first provided row.
-	 * The provided rows must have exactly the same keys and ordering thereof.
-	 *
-	 * @param array[] $rows Non-empty list of (column => value) maps
-	 * @param string $aliasPrefix Optional prefix to prepend to the magic alias names
-	 * @return array (comma-separated columns, comma-separated tuples, comma-separated aliases)
-	 * @since 1.35
-	 */
-	protected function makeInsertLists( array $rows, $aliasPrefix = '' ) {
-		$firstRow = $rows[0];
-		if ( !is_array( $firstRow ) || !$firstRow ) {
-			throw new DBUnexpectedError( $this, 'Got an empty row list or empty row' );
-		}
-		// List of columns that define the value tuple ordering
-		$tupleColumns = array_keys( $firstRow );
-
-		$valueTuples = [];
-		foreach ( $rows as $row ) {
-			$rowColumns = array_keys( $row );
-			// VALUES(...) requires a uniform correspondence of (column => value)
-			if ( $rowColumns !== $tupleColumns ) {
-				throw new DBUnexpectedError(
-					$this,
-					'Got row columns (' . implode( ', ', $rowColumns ) . ') ' .
-					'instead of expected (' . implode( ', ', $tupleColumns ) . ')'
-				);
-			}
-			// Make the value tuple that defines this row
-			$valueTuples[] = '(' . $this->makeList( $row, self::LIST_COMMA ) . ')';
-		}
-
-		$magicAliasFields = [];
-		foreach ( $tupleColumns as $column ) {
-			$magicAliasFields[] = $aliasPrefix . $column;
-		}
-
-		return [
-			$this->makeList( $tupleColumns, self::LIST_NAMES ),
-			implode( ',', $valueTuples ),
-			$this->makeList( $magicAliasFields, self::LIST_NAMES )
-		];
-	}
-
-	/**
-	 * Make UPDATE options array for Database::makeUpdateOptions
-	 *
-	 * @stable to override
-	 * @param array $options
-	 * @return array
-	 */
-	protected function makeUpdateOptionsArray( $options ) {
-		$options = $this->normalizeOptions( $options );
-
-		$opts = [];
-
-		if ( in_array( 'IGNORE', $options ) ) {
-			$opts[] = 'IGNORE';
-		}
-
-		return $opts;
-	}
-
-	/**
-	 * Make UPDATE options for the Database::update function
-	 *
-	 * @stable to override
-	 * @param array $options The options passed to Database::update
-	 * @return string
-	 */
-	protected function makeUpdateOptions( $options ) {
-		$opts = $this->makeUpdateOptionsArray( $options );
-
-		return implode( ' ', $opts );
 	}
 
 	public function update( $table, $set, $conds, $fname = __METHOD__, $options = [] ) {
-		$this->assertConditionIsNotEmpty( $conds, __METHOD__, true );
-		$table = $this->tableName( $table );
-		$opts = $this->makeUpdateOptions( $options );
-		$sql = "UPDATE $opts $table SET " . $this->makeList( $set, self::LIST_SET );
-
-		if ( $conds && $conds !== IDatabase::ALL_ROWS ) {
-			if ( is_array( $conds ) ) {
-				$conds = $this->makeList( $conds, self::LIST_AND );
-			}
-			$sql .= ' WHERE ' . $conds;
-		}
-
+		$sql = $this->platform->updateSqlText( $table, $set, $conds, $options );
 		$this->query( $sql, $fname, self::QUERY_CHANGE_ROWS );
 
 		return true;
-	}
-
-	/**
-	 * Check type and bounds conditions parameters for update
-	 *
-	 * In order to prevent possible performance or replication issues,
-	 * empty condition for 'update' and 'delete' queries isn't allowed
-	 *
-	 * @param array|string $conds conditions to be validated on emptiness
-	 * @param string $fname caller's function name to be passed to exception
-	 * @param bool $deprecate define the assertion type. If true then
-	 *   wfDeprecated will be called, otherwise DBUnexpectedError will be
-	 *   raised.
-	 * @since 1.35
-	 */
-	protected function assertConditionIsNotEmpty( $conds, string $fname, bool $deprecate ) {
-		$isCondValid = ( is_string( $conds ) || is_array( $conds ) ) && $conds;
-		if ( !$isCondValid ) {
-			if ( $deprecate ) {
-				wfDeprecated( $fname . ' called with empty $conds', '1.35', false, 3 );
-			} else {
-				throw new DBUnexpectedError( $this, $fname . ' called with empty conditions' );
-			}
-		}
 	}
 
 	public function buildExcludedValue( $column ) {
@@ -2668,7 +2494,8 @@ abstract class Database implements IDatabase, IMaintainableDatabase, LoggerAware
 		if ( $identityKey ) {
 			$this->doReplace( $table, $identityKey, $rows, $fname );
 		} else {
-			$this->doInsert( $table, $rows, $fname );
+			$sql = $this->platform->insertSqlText( $table, $rows );
+			$this->query( $sql, $fname, self::QUERY_CHANGE_ROWS );
 		}
 	}
 
@@ -2687,7 +2514,7 @@ abstract class Database implements IDatabase, IMaintainableDatabase, LoggerAware
 		try {
 			foreach ( $rows as $row ) {
 				// Delete any conflicting rows (including ones inserted from $rows)
-				$sqlCondition = $this->makeKeyCollisionCondition( [ $row ], $identityKey );
+				$sqlCondition = $this->platform->makeKeyCollisionCondition( [ $row ], $identityKey );
 				$this->delete( $table, [ $sqlCondition ], $fname );
 				$affectedRowCount += $this->affectedRows();
 				// Insert the new row
@@ -2702,51 +2529,6 @@ abstract class Database implements IDatabase, IMaintainableDatabase, LoggerAware
 		$this->affectedRowCount = $affectedRowCount;
 	}
 
-	/**
-	 * Build an SQL condition to find rows with matching key values to those in $rows.
-	 *
-	 * @param array[] $rows Non-empty list of rows
-	 * @param string[] $uniqueKey List of columns that define a single unique index
-	 * @return string
-	 * @since 1.38
-	 */
-	protected function makeKeyCollisionCondition( array $rows, array $uniqueKey ) {
-		if ( !$rows ) {
-			throw new DBUnexpectedError( $this, "Empty row array" );
-		} elseif ( !$uniqueKey ) {
-			throw new DBUnexpectedError( $this, "Empty unique key array" );
-		}
-
-		if ( count( $uniqueKey ) == 1 ) {
-			// Use a simple IN(...) clause
-			$column = reset( $uniqueKey );
-			$values = array_column( $rows, $column );
-			if ( count( $values ) !== count( $rows ) ) {
-				throw new DBUnexpectedError( $this, "Missing values for unique key ($column)" );
-			}
-
-			return $this->makeList( [ $column => $values ], self::LIST_AND );
-		}
-
-		$nullByUniqueKeyColumn = array_fill_keys( $uniqueKey, null );
-
-		$orConds = [];
-		foreach ( $rows as $row ) {
-			$rowKeyMap = array_intersect_key( $row, $nullByUniqueKeyColumn );
-			if ( count( $rowKeyMap ) != count( $uniqueKey ) ) {
-				throw new DBUnexpectedError(
-					$this,
-					"Missing values for unique key (" . implode( ',', $uniqueKey ) . ")"
-				);
-			}
-			$orConds[] = $this->makeList( $rowKeyMap, self::LIST_AND );
-		}
-
-		return count( $orConds ) > 1
-			? $this->makeList( $orConds, self::LIST_OR )
-			: $orConds[0];
-	}
-
 	public function upsert( $table, array $rows, $uniqueKeys, array $set, $fname = __METHOD__ ) {
 		$identityKey = $this->normalizeUpsertParams( $uniqueKeys, $rows );
 		if ( !$rows ) {
@@ -2756,7 +2538,8 @@ abstract class Database implements IDatabase, IMaintainableDatabase, LoggerAware
 			$this->assertValidUpsertSetArray( $set, $identityKey, $rows );
 			$this->doUpsert( $table, $rows, $identityKey, $set, $fname );
 		} else {
-			$this->doInsert( $table, $rows, $fname );
+			$sql = $this->platform->insertSqlText( $table, $rows );
+			$this->query( $sql, $fname, self::QUERY_CHANGE_ROWS );
 		}
 
 		return true;
@@ -2795,7 +2578,7 @@ abstract class Database implements IDatabase, IMaintainableDatabase, LoggerAware
 			foreach ( $rows as $row ) {
 				// Update any existing conflicting row (including ones inserted from $rows)
 				[ $sqlColumns, $sqlTuples, $sqlVals ] = $this->makeInsertLists( [ $row ], '__' );
-				$sqlConditions = $this->makeKeyCollisionCondition( [ $row ], $identityKey );
+				$sqlConditions = $this->platform->makeKeyCollisionCondition( [ $row ], $identityKey );
 				// Since "WITH...AS (VALUES ...)" loses type information, subclasses should
 				// override with method if that might cause problems with the SET clause.
 				// https://www.sqlite.org/lang_update.html
@@ -2841,18 +2624,7 @@ abstract class Database implements IDatabase, IMaintainableDatabase, LoggerAware
 		$conds,
 		$fname = __METHOD__
 	) {
-		if ( !$conds ) {
-			throw new DBUnexpectedError( $this, __METHOD__ . ' called with empty $conds' );
-		}
-
-		$delTable = $this->tableName( $delTable );
-		$joinTable = $this->tableName( $joinTable );
-		$sql = "DELETE FROM $delTable WHERE $delVar IN (SELECT $joinVar FROM $joinTable ";
-		if ( $conds != '*' ) {
-			$sql .= 'WHERE ' . $this->makeList( $conds, self::LIST_AND );
-		}
-		$sql .= ')';
-
+		$sql = $this->platform->deleteJoinSqlText( $delTable, $joinTable, $delVar, $joinVar, $conds );
 		$this->query( $sql, $fname, self::QUERY_CHANGE_ROWS );
 	}
 
@@ -2881,18 +2653,7 @@ abstract class Database implements IDatabase, IMaintainableDatabase, LoggerAware
 	}
 
 	public function delete( $table, $conds, $fname = __METHOD__ ) {
-		$this->assertConditionIsNotEmpty( $conds, __METHOD__, false );
-
-		$table = $this->tableName( $table );
-		$sql = "DELETE FROM $table";
-
-		if ( $conds !== IDatabase::ALL_ROWS ) {
-			if ( is_array( $conds ) ) {
-				$conds = $this->makeList( $conds, self::LIST_AND );
-			}
-			$sql .= ' WHERE ' . $conds;
-		}
-
+		$sql = $this->platform->deleteSqlText( $table, $conds );
 		$this->query( $sql, $fname, self::QUERY_CHANGE_ROWS );
 
 		return true;
@@ -3042,22 +2803,16 @@ abstract class Database implements IDatabase, IMaintainableDatabase, LoggerAware
 		array $selectOptions,
 		$selectJoinConds
 	) {
-		list( $sqlVerb, $sqlOpts ) = $this->isFlagInOptions( 'IGNORE', $insertOptions )
-			? $this->makeInsertNonConflictingVerbAndOptions()
-			: [ 'INSERT INTO', '' ];
-		$encDstTable = $this->tableName( $destTable );
-		$sqlDstColumns = implode( ',', array_keys( $varMap ) );
-		$selectSql = $this->selectSQLText(
+		$sql = $this->platform->insertSelectNativeSqlText(
+			$destTable,
 			$srcTable,
-			array_values( $varMap ),
+			$varMap,
 			$conds,
 			$fname,
+			$insertOptions,
 			$selectOptions,
 			$selectJoinConds
 		);
-
-		$sql = rtrim( "$sqlVerb $encDstTable ($sqlDstColumns) $selectSql $sqlOpts" );
-
 		$this->query( $sql, $fname, self::QUERY_CHANGE_ROWS );
 	}
 
@@ -4929,6 +4684,18 @@ abstract class Database implements IDatabase, IMaintainableDatabase, LoggerAware
 		$options = [], $join_conds = []
 	) {
 		return $this->platform->buildSelectSubquery( $table, $vars, $conds, $fname, $options, $join_conds );
+	}
+
+	protected function makeInsertLists( array $rows, $aliasPrefix = '' ) {
+		return $this->platform->makeInsertLists( $rows, $aliasPrefix );
+	}
+
+	final protected function isFlagInOptions( $option, array $options ) {
+		return $this->platform->isFlagInOptions( $option, $options );
+	}
+
+	final protected function normalizeOptions( $options ) {
+		return $this->platform->normalizeOptions( $options );
 	}
 
 	/* End of methods delegated to SQLPlatform. */

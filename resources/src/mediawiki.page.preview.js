@@ -18,20 +18,18 @@
 	 * @private
 	 * @param {jQuery} $formNode
 	 * @param {Object} response
-	 * @param {string} section
 	 */
-	function showEditSummary( $formNode, response, section ) {
+	function showEditSummary( $formNode, response ) {
 		var parse = response.parse;
 
 		if ( !parse || !parse.parsedsummary ) {
 			return;
 		}
 
-		var isSubject = ( section === 'new' ),
-			$summaryPreview = $formNode.find( '.mw-summary-preview' ).empty();
+		var $summaryPreview = $formNode.find( '.mw-summary-preview' ).empty();
 
 		$summaryPreview.append(
-			mw.message( isSubject ? 'subject-preview' : 'summary-preview' ).parse(),
+			mw.message( 'summary-preview' ).parse(),
 			' ',
 			$( '<span>' ).addClass( 'comment' ).html(
 				// There is no equivalent to rawParams
@@ -177,6 +175,13 @@
 			$( '.catlinks[data-mw="interface"]' ).replaceWith( $content );
 		}
 
+		// Table of contents.
+		if ( response.parse.sections ) {
+			mw.hook( 'wikipage.tableOfContents' ).fire(
+				response.parse.hidetoc ? [] : response.parse.sections
+			);
+		}
+
 		// Templates.
 		if ( response.parse.templates ) {
 			showTemplates( response.parse.templates );
@@ -244,7 +249,7 @@
 
 		if ( !config.showDiff ) {
 			$.extend( params, {
-				prop: 'text|indicators|displaytitle|modules|jsconfigvars|categorieshtml|templates|langlinks|limitreporthtml|parsewarningshtml',
+				prop: 'text|indicators|displaytitle|modules|jsconfigvars|categorieshtml|sections|templates|langlinks|limitreporthtml|parsewarningshtml',
 				text: config.$textareaNode.textSelection( 'getContents' ),
 				pst: true,
 				preview: true,
@@ -259,6 +264,7 @@
 			if ( section === 'new' ) {
 				params.section = 'new';
 				params.sectiontitle = params.summary;
+				delete params.summary;
 			}
 		}
 
@@ -376,6 +382,8 @@
 
 		if ( config.showDiff ) {
 			config.$previewNode.hide();
+			// Hide the table of contents, in case it was previously shown after previewing.
+			mw.hook( 'wikipage.tableOfContents' ).fire( [] );
 
 			var diffPar = {
 				action: 'compare',
@@ -408,7 +416,7 @@
 
 		return $.when( parseRequest, diffRequest )
 			.done( function ( response, diffResponse ) {
-				showEditSummary( config.$formNode, response[ 0 ], section );
+				showEditSummary( config.$formNode, response[ 0 ] );
 
 				if ( config.showDiff ) {
 					parseDiffResponse( config, diffResponse[ 0 ] );
