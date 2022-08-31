@@ -13,6 +13,7 @@
 			"NR Deblocked",
 			"Reedy",
 			"Urhixidur",
+			"Ерней",
 			"לערי ריינהארט",
 			"아라"
 		]
@@ -249,7 +250,7 @@
 	"feed-rss": "RSS-tasması",
 	"red-link-title": "$1 (mondıy bit yuq)",
 	"nstab-main": "Bit",
-	"nstab-user": "Qullanuçı bite",
+	"nstab-user": "{{GENDER:$1|Qullanuçı bite}}",
 	"nstab-media": "Multimedia",
 	"nstab-special": "Maxsus bit",
 	"nstab-project": "Proyekt bite",
@@ -589,8 +590,6 @@
 	"search-redirect": "(yünältü $1)",
 	"search-section": "($1 bülege)",
 	"search-suggest": "Bälki, sez monı ezlisez: $1",
-	"search-interwiki-caption": "Tuğandaş proyektlar",
-	"search-interwiki-default": "$1 näticä:",
 	"search-interwiki-more": "(tağın)",
 	"search-relatedarticle": "Bäylängän",
 	"searchrelated": "bäylängän",
@@ -1325,7 +1324,6 @@
 	"nextdiff": "Çirattağı üzgärtü →",
 	"imagemaxsize": "Räsemneñ zurlığına çikläwlär:<br />''(taswirlaw bite öçen)''",
 	"thumbsize": "Räsemneñ keçeräytelgän yuraması öçen:",
-	"widthheight": "$1 × $2",
 	"widthheightpage": "$1 × $2, $3{{PLURAL:$1|bit|bitlär}}",
 	"file-info": "fayl zurlığı: $1, MIME-tip: $2",
 	"file-info-size": "$1 × $2 noqta, faylnıñ zurlığı: $3, MIME tibı: $4",

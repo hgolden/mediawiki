@@ -22,6 +22,7 @@
 
 use MediaWiki\MainConfigNames;
 use MediaWiki\MediaWikiServices;
+use MediaWiki\ResourceLoader\CodexModule;
 use MediaWiki\ResourceLoader\Context;
 use MediaWiki\ResourceLoader\FilePath;
 use MediaWiki\ResourceLoader\ForeignApiModule;
@@ -105,13 +106,6 @@ return [
 		'targets' => [ 'desktop', 'mobile' ],
 	],
 
-	'mediawiki.skinning.content.externallinks' => [
-		'deprecated' => 'Your default skin ResourceLoader class should use '
-			. 'the "content-links" feature in \MediaWiki\ResourceLoader\SkinModule::class',
-		'class' => SkinModule::class,
-		'features' => [ 'content-links' ],
-	],
-
 	/* Base modules */
 	// These modules' dependencies MUST also be included in StartUpModule::getBaseModules().
 	// These modules' dependencies MUST be dependency-free (having dependencies would cause recursion).
@@ -157,7 +151,7 @@ return [
 			'errorLogger.js',
 
 			// (not this though)
-			[ 'name' => 'config.json', 'callback' => 'ResourceLoader::getSiteConfigSettings' ],
+			[ 'name' => 'config.json', 'callback' => [ ResourceLoader::class, 'getSiteConfigSettings' ] ],
 			[
 				'name' => 'user.json',
 				'callback' => static function ( Context $context ) {
@@ -656,6 +650,7 @@ return [
 	],
 
 	'wvui' => [
+		'deprecated' => 'Deprecated in 1.39. Use `@wikimedia/codex` instead.',
 		'packageFiles' => [
 			'resources/src/wvui/wvui.js',
 			'resources/lib/wvui/wvui.commonjs2.js',
@@ -685,7 +680,7 @@ return [
 	],
 
 	'@wikimedia/codex' => [
-		'class' => '\MediaWiki\ResourceLoader\CodexModule',
+		'class' => CodexModule::class,
 		'targets' => [ 'desktop', 'mobile' ],
 		'packageFiles' => [
 			'resources/src/codex/codex.js',
@@ -705,7 +700,7 @@ return [
 	],
 
 	'@wikimedia/codex-search' => [
-		'class' => '\MediaWiki\ResourceLoader\CodexModule',
+		'class' => CodexModule::class,
 		'targets' => [ 'desktop', 'mobile' ],
 		'packageFiles' => [
 			'resources/src/codex-search/codex-search.js',
@@ -1035,6 +1030,9 @@ return [
 	'mediawiki.storage' => [
 		'scripts' => 'resources/src/mediawiki.storage.js',
 		'targets' => [ 'desktop', 'mobile' ],
+		'dependencies' => [
+			'mediawiki.util',
+		],
 	],
 	'mediawiki.Title' => [
 		'localBasePath' => "$wgBaseDirectory/resources/src/mediawiki.Title",
@@ -1245,10 +1243,11 @@ return [
 				MainConfigNames::GenerateThumbnailOnParse,
 				MainConfigNames::LoadScript,
 			] ],
-			[ 'name' => 'portletLinkOptions.json', 'callback' => 'Skin::getPortletLinkOptions' ],
+			[ 'name' => 'portletLinkOptions.json', 'callback' => [ Skin::class, 'getPortletLinkOptions' ] ],
 		],
 		'dependencies' => [
 			'jquery.client',
+			'web2017-polyfills',
 		],
 		'messages' => [ 'brackets', 'word-separator' ],
 		'targets' => [ 'desktop', 'mobile' ],
@@ -1835,8 +1834,8 @@ return [
 			'ui/RclToOrFromWidget.js',
 			'ui/WatchlistTopSectionWidget.js',
 			[ 'name' => 'config.json',
-				'versionCallback' => 'ChangesListSpecialPage::getRcFiltersConfigSummary',
-				'callback' => 'ChangesListSpecialPage::getRcFiltersConfigVars',
+				'versionCallback' => [ ChangesListSpecialPage::class, 'getRcFiltersConfigSummary' ],
+				'callback' => [ ChangesListSpecialPage::class, 'getRcFiltersConfigVars' ],
 			],
 		],
 		'styles' => [
@@ -2228,7 +2227,10 @@ return [
 			'watchlist-expiry-hours-left',
 		],
 		'targets' => [ 'desktop', 'mobile' ],
-		'dependencies' => [ 'mediawiki.special' ],
+		'dependencies' => [
+			'mediawiki.special',
+			'oojs-ui.styles.icons-interactions'
+		],
 	],
 	'mediawiki.special.changeslist.enhanced' => [
 		'styles' => 'resources/src/mediawiki.special.changeslist.enhanced.less',

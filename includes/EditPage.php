@@ -78,7 +78,6 @@ use OOUI\FieldLayout;
 use Wikimedia\Assert\Assert;
 use Wikimedia\Message\MessageValue;
 use Wikimedia\ParamValidator\TypeDef\ExpiryDef;
-use Wikimedia\ScopedCallback;
 
 /**
  * The edit page/HTML interface (split from Article)
@@ -1151,17 +1150,24 @@ class EditPage implements IEditObject {
 					}
 				} else {
 					$this->sectiontitle = $request->getText( 'wpSummary' );
-					# If the summary consists of a heading, e.g. '==Foobar==', extract the title from the
-					# header syntax, e.g. 'Foobar'. This is mainly an issue when we are using wpSummary for
-					# section titles. (T3600)
-					# (This may be no longer desirable, now that this code is an API for other editing interfaces?)
-					$this->sectiontitle = preg_replace( '/^\s*=+\s*(.*?)\s*=+\s*$/', '$1', $this->sectiontitle );
 				}
-
-				$this->setNewSectionSummary();
 			} else {
 				$this->sectiontitle = null;
 				$this->summary = $request->getText( 'wpSummary' );
+			}
+
+			# If the summary consists of a heading, e.g. '==Foobar==', extract the title from the
+			# header syntax, e.g. 'Foobar'. This is mainly an issue when we are using wpSummary for
+			# section titles. (T3600)
+			# It is weird to modify 'sectiontitle', even when it is provided when using the API, but API
+			# users have come to rely on it: https://github.com/wikimedia-gadgets/twinkle/issues/1625
+			$this->summary = preg_replace( '/^\s*=+\s*(.*?)\s*=+\s*$/', '$1', $this->summary );
+			if ( $this->sectiontitle !== null ) {
+				$this->sectiontitle = preg_replace( '/^\s*=+\s*(.*?)\s*=+\s*$/', '$1', $this->sectiontitle );
+			}
+
+			if ( $this->section === 'new' ) {
+				$this->setNewSectionSummary();
 			}
 
 			$this->edittime = $request->getVal( 'wpEdittime' );
@@ -4473,15 +4479,13 @@ class EditPage implements IEditObject {
 		// NOTE: preSaveTransform doesn't have a fake revision to operate on.
 		// Parser::getRevisionRecordObject() will return null in preview mode,
 		// causing the context user to be used for {{subst:REVISIONUSER}}.
-		// XXX: Alternatively, we could also call setupFakeRevision() a second time:
-		// once before PST with $content, and then after PST with $pstContent.
+		// XXX: Alternatively, we could also call setupFakeRevision()
+		// before PST with $content.
 		$services = MediaWikiServices::getInstance();
 		$contentTransformer = $services->getContentTransformer();
 		$contentRenderer = $services->getContentRenderer();
 		$pstContent = $contentTransformer->preSaveTransform( $content, $this->mTitle, $user, $parserOptions );
-		$scopedCallback = $parserOptions->setupFakeRevision( $this->mTitle, $pstContent, $user );
 		$parserOutput = $contentRenderer->getParserOutput( $pstContent, $this->mTitle, null, $parserOptions );
-		ScopedCallback::consume( $scopedCallback );
 		$out = $this->context->getOutput();
 		$skin = $out->getSkin();
 		$skinOptions = $skin->getOptions();

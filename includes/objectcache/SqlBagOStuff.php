@@ -30,6 +30,7 @@ use Wikimedia\Rdbms\DBQueryError;
 use Wikimedia\Rdbms\IDatabase;
 use Wikimedia\Rdbms\ILoadBalancer;
 use Wikimedia\Rdbms\IMaintainableDatabase;
+use Wikimedia\Rdbms\SelectQueryBuilder;
 use Wikimedia\ScopedCallback;
 use Wikimedia\Timestamp\ConvertibleTimestamp;
 
@@ -137,7 +138,6 @@ class SqlBagOStuff extends MediumSpecificBagOStuff {
 	 *   - tableName: string
 	 *   - shards: int
 	 *   - replicaOnly: bool
-	 *   - syncTimeout: int|float
 	 *   - writeBatchSize: int
 	 */
 	public function __construct( $params ) {
@@ -490,14 +490,15 @@ class SqlBagOStuff extends MediumSpecificBagOStuff {
 			try {
 				$db = $this->getConnection( $shardIndex );
 				foreach ( $serverKeys as $partitionTable => $tableKeys ) {
-					$res = $db->select(
-						$partitionTable,
-						$getCasToken
+					$res = $db->newSelectQueryBuilder()
+						->select(
+							$getCasToken
 							? $this->addCasTokenFields( $db, [ 'keyname', 'value', 'exptime' ] )
-							: [ 'keyname', 'value', 'exptime' ],
-						$this->buildExistenceConditions( $db, $tableKeys, $readTime ),
-						__METHOD__
-					);
+							: [ 'keyname', 'value', 'exptime' ] )
+						->from( $partitionTable )
+						->where( $this->buildExistenceConditions( $db, $tableKeys, $readTime ) )
+						->caller( __METHOD__ )
+						->fetchResultSet();
 					foreach ( $res as $row ) {
 						$row->shardIndex = $shardIndex;
 						$row->tableName = $partitionTable;
@@ -581,14 +582,6 @@ class SqlBagOStuff extends MediumSpecificBagOStuff {
 		}
 
 		$success = !in_array( false, $resByKey, true );
-
-		if ( $shardIndexesAffected && $this->useLB
-			&& $this->fieldHasFlags( $flags, self::WRITE_SYNC )
-		) {
-			if ( !$this->waitForReplication() ) {
-				$success = false;
-			}
-		}
 
 		foreach ( $shardIndexesAffected as $shardIndex ) {
 			try {
@@ -745,12 +738,12 @@ class SqlBagOStuff extends MediumSpecificBagOStuff {
 		$mt = $this->makeTimestampedModificationToken( $mtime, $db );
 
 		// This check must happen outside the write query to respect eventual consistency
-		$existingKeys = $db->selectFieldValues(
-			$ptable,
-			'keyname',
-			$this->buildExistenceConditions( $db, array_keys( $argsByKey ), (int)$mtime ),
-			__METHOD__
-		);
+		$existingKeys = $db->newSelectQueryBuilder()
+			->select( 'keyname' )
+			->from( $ptable )
+			->where( $this->buildExistenceConditions( $db, array_keys( $argsByKey ), (int)$mtime ) )
+			->caller( __METHOD__ )
+			->fetchFieldValues();
 		$existingByKey = array_fill_keys( $existingKeys, true );
 
 		// @TODO: use multi-row upsert() with VALUES() once supported in Database
@@ -809,12 +802,12 @@ class SqlBagOStuff extends MediumSpecificBagOStuff {
 		$mt = $this->makeTimestampedModificationToken( $mtime, $db );
 
 		// This check must happen outside the write query to respect eventual consistency
-		$res = $db->select(
-			$ptable,
-			$this->addCasTokenFields( $db, [ 'keyname' ] ),
-			$this->buildExistenceConditions( $db, array_keys( $argsByKey ), (int)$mtime ),
-			__METHOD__
-		);
+		$res = $db->newSelectQueryBuilder()
+			->select( $this->addCasTokenFields( $db, [ 'keyname' ] ) )
+			->from( $ptable )
+			->where( $this->buildExistenceConditions( $db, array_keys( $argsByKey ), (int)$mtime ) )
+			->caller( __METHOD__ )
+			->fetchResultSet();
 
 		$curTokensByKey = [];
 		foreach ( $res as $row ) {
@@ -880,12 +873,12 @@ class SqlBagOStuff extends MediumSpecificBagOStuff {
 		if ( $this->multiPrimaryMode ) {
 			$mt = $this->makeTimestampedModificationToken( $mtime, $db );
 
-			$res = $db->select(
-				$ptable,
-				[ 'keyname', 'value' ],
-				$this->buildExistenceConditions( $db, array_keys( $argsByKey ), (int)$mtime ),
-				__METHOD__
-			);
+			$res = $db->newSelectQueryBuilder()
+				->select( [ 'keyname', 'value' ] )
+				->from( $ptable )
+				->where( $this->buildExistenceConditions( $db, array_keys( $argsByKey ), (int)$mtime ) )
+				->caller( __METHOD__ )
+				->fetchResultSet();
 			// @TODO: use multi-row upsert() with VALUES() once supported in Database
 			foreach ( $res as $curRow ) {
 				$key = $curRow->keyname;
@@ -963,16 +956,26 @@ class SqlBagOStuff extends MediumSpecificBagOStuff {
 			// "consistent reads". This way, the exact post-increment value can be returned.
 			// The "live key exists" check can go inside the write query and remain safe for
 			// replication since the TTL for such keys is either indefinite or very short.
-			$db->startAtomic( __METHOD__ );
-			$db->upsert(
-				$ptable,
-				$this->buildUpsertRow( $db, $key, $init, $expiry, $mt ),
-				[ [ 'keyname' ] ],
-				$this->buildIncrUpsertSet( $db, $step, $init, $expiry, $mt, (int)$mtime ),
-				__METHOD__
-			);
-			$affectedCount = $db->affectedRows();
-			$row = $db->selectRow( $ptable, 'value', [ 'keyname' => $key ], __METHOD__ );
+			$atomic = $db->startAtomic( __METHOD__, IDatabase::ATOMIC_CANCELABLE );
+			try {
+				$db->upsert(
+					$ptable,
+					$this->buildUpsertRow( $db, $key, $init, $expiry, $mt ),
+					[ [ 'keyname' ] ],
+					$this->buildIncrUpsertSet( $db, $step, $init, $expiry, $mt, (int)$mtime ),
+					__METHOD__
+				);
+				$affectedCount = $db->affectedRows();
+				$row = $db->newSelectQueryBuilder()
+					->select( 'value' )
+					->from( $ptable )
+					->where( [ 'keyname' => $key ] )
+					->caller( __METHOD__ )
+					->fetchRow();
+			} catch ( Exception $e ) {
+				$db->cancelAtomic( __METHOD__, $atomic );
+				throw $e;
+			}
 			$db->endAtomic( __METHOD__ );
 
 			if ( !$affectedCount || $row === false ) {
@@ -1194,7 +1197,8 @@ class SqlBagOStuff extends MediumSpecificBagOStuff {
 			$expressionsByColumn['modtoken'] = $db->addQuotes( $mt );
 			foreach ( $expressionsByColumn as $column => $updateExpression ) {
 				$rhs = $db->conditional(
-					$db->addQuotes( substr( $mt, 0, 13 ) ) . ' >= SUBSTR(modtoken,0,13)',
+					$db->addQuotes( substr( $mt, 0, 13 ) ) . ' >= ' .
+						$db->buildSubString( 'modtoken', 1, 13 ),
 					$updateExpression,
 					$column
 				);
@@ -1468,16 +1472,19 @@ class SqlBagOStuff extends MediumSpecificBagOStuff {
 			$totalSeconds = null;
 
 			do {
-				$res = $db->select(
-					$this->getTableNameByShard( $tableIndex ),
-					[ 'keyname', 'exptime' ],
-					array_merge(
-						[ 'exptime < ' . $db->addQuotes( $db->timestamp( $cutoffUnix ) ) ],
-						$maxExp ? [ 'exptime >= ' . $db->addQuotes( $maxExp ) ] : []
-					),
-					__METHOD__,
-					[ 'LIMIT' => $batchSize, 'ORDER BY' => 'exptime ASC' ]
-				);
+				$res = $db->newSelectQueryBuilder()
+					->select( [ 'keyname', 'exptime' ] )
+					->from( $this->getTableNameByShard( $tableIndex ) )
+					->where(
+						array_merge(
+							[ 'exptime < ' . $db->addQuotes( $db->timestamp( $cutoffUnix ) ) ],
+							$maxExp ? [ 'exptime >= ' . $db->addQuotes( $maxExp ) ] : []
+						)
+					)
+					->orderBy( 'exptime', SelectQueryBuilder::SORT_ASC )
+					->limit( $batchSize )
+					->caller( __METHOD__ )
+					->fetchResultSet();
 
 				if ( $res->numRows() ) {
 					$row = $res->current();
@@ -1678,6 +1685,8 @@ class SqlBagOStuff extends MediumSpecificBagOStuff {
 			);
 		}
 
+		// Make sure any errors are thrown now while we can more easily handle them
+		$conn->ensureConnection();
 		return $conn;
 	}
 
@@ -1727,11 +1736,11 @@ class SqlBagOStuff extends MediumSpecificBagOStuff {
 	}
 
 	/**
-	 * @param DBError $exception
+	 * @param DBError $e
 	 */
-	private function setAndLogDBError( DBError $exception ) {
-		$this->logger->error( "DBError: {$exception->getMessage()}" );
-		if ( $exception instanceof DBConnectionError ) {
+	private function setAndLogDBError( DBError $e ) {
+		$this->logger->error( "DBError: {$e->getMessage()}", [ 'exception' => $e ] );
+		if ( $e instanceof DBConnectionError ) {
 			$this->setLastError( self::ERR_UNREACHABLE );
 			$this->logger->warning( __METHOD__ . ": ignoring connection error" );
 		} else {
@@ -1852,36 +1861,6 @@ class SqlBagOStuff extends MediumSpecificBagOStuff {
 			}
 		}
 		throw new InvalidArgumentException( "Unknown server tag: $tag" );
-	}
-
-	/**
-	 * Wait for replica DBs to catch up to the primary DB
-	 *
-	 * @return bool Success
-	 */
-	private function waitForReplication() {
-		if ( !$this->useLB ) {
-			return true; // striped only, no LoadBalancer
-		}
-
-		$lb = $this->getLoadBalancer();
-		if ( !$lb->hasStreamingReplicaServers() ) {
-			return true;
-		}
-
-		try {
-			// Wait for any replica DBs to catch up
-			$primaryPos = $lb->getPrimaryPos();
-			if ( !$primaryPos ) {
-				return true; // not applicable
-			}
-
-			return $lb->waitForAll( $primaryPos, $this->syncTimeout );
-		} catch ( DBError $e ) {
-			$this->setAndLogDBError( $e );
-
-			return false;
-		}
 	}
 
 	/**

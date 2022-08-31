@@ -1510,7 +1510,7 @@ class DatabaseSQLTest extends PHPUnit\Framework\TestCase {
 
 	/**
 	 * @covers Wikimedia\Rdbms\Database::rollback
-	 * @covers Wikimedia\Rdbms\Database::doRollback
+	 * @covers Wikimedia\Rdbms\Platform\SQLPlatform::rollbackSqlText
 	 */
 	public function testTransactionRollback() {
 		$this->database->begin( __METHOD__ );
@@ -1775,9 +1775,9 @@ class DatabaseSQLTest extends PHPUnit\Framework\TestCase {
 	}
 
 	/**
-	 * @covers \Wikimedia\Rdbms\Database::doSavepoint
-	 * @covers \Wikimedia\Rdbms\Database::doReleaseSavepoint
-	 * @covers \Wikimedia\Rdbms\Database::doRollbackToSavepoint
+	 * @covers \Wikimedia\Rdbms\Platform\SQLPlatform::savepointSqlText
+	 * @covers \Wikimedia\Rdbms\Platform\SQLPlatform::releaseSavepointSqlText
+	 * @covers \Wikimedia\Rdbms\Platform\SQLPlatform::rollbackToSavepointSqlText
 	 * @covers \Wikimedia\Rdbms\Database::startAtomic
 	 * @covers \Wikimedia\Rdbms\Database::endAtomic
 	 * @covers \Wikimedia\Rdbms\Database::cancelAtomic
@@ -2002,9 +2002,9 @@ class DatabaseSQLTest extends PHPUnit\Framework\TestCase {
 	}
 
 	/**
-	 * @covers \Wikimedia\Rdbms\Database::doSavepoint
-	 * @covers \Wikimedia\Rdbms\Database::doReleaseSavepoint
-	 * @covers \Wikimedia\Rdbms\Database::doRollbackToSavepoint
+	 * @covers \Wikimedia\Rdbms\Platform\SQLPlatform::savepointSqlText
+	 * @covers \Wikimedia\Rdbms\Platform\SQLPlatform::releaseSavepointSqlText
+	 * @covers \Wikimedia\Rdbms\Platform\SQLPlatform::rollbackToSavepointSqlText
 	 * @covers \Wikimedia\Rdbms\Database::startAtomic
 	 * @covers \Wikimedia\Rdbms\Database::endAtomic
 	 * @covers \Wikimedia\Rdbms\Database::cancelAtomic
@@ -2056,9 +2056,9 @@ class DatabaseSQLTest extends PHPUnit\Framework\TestCase {
 	}
 
 	/**
-	 * @covers \Wikimedia\Rdbms\Database::doSavepoint
-	 * @covers \Wikimedia\Rdbms\Database::doReleaseSavepoint
-	 * @covers \Wikimedia\Rdbms\Database::doRollbackToSavepoint
+	 * @covers \Wikimedia\Rdbms\Platform\SQLPlatform::savepointSqlText
+	 * @covers \Wikimedia\Rdbms\Platform\SQLPlatform::releaseSavepointSqlText
+	 * @covers \Wikimedia\Rdbms\Platform\SQLPlatform::rollbackToSavepointSqlText
 	 * @covers \Wikimedia\Rdbms\Database::startAtomic
 	 * @covers \Wikimedia\Rdbms\Database::endAtomic
 	 * @covers \Wikimedia\Rdbms\Database::cancelAtomic
@@ -2238,9 +2238,9 @@ class DatabaseSQLTest extends PHPUnit\Framework\TestCase {
 	}
 
 	/**
-	 * @covers \Wikimedia\Rdbms\Database::doSavepoint
-	 * @covers \Wikimedia\Rdbms\Database::doReleaseSavepoint
-	 * @covers \Wikimedia\Rdbms\Database::doRollbackToSavepoint
+	 * @covers \Wikimedia\Rdbms\Platform\SQLPlatform::savepointSqlText
+	 * @covers \Wikimedia\Rdbms\Platform\SQLPlatform::releaseSavepointSqlText
+	 * @covers \Wikimedia\Rdbms\Platform\SQLPlatform::rollbackToSavepointSqlText
 	 * @covers \Wikimedia\Rdbms\Database::startAtomic
 	 * @covers \Wikimedia\Rdbms\Database::endAtomic
 	 * @covers \Wikimedia\Rdbms\Database::cancelAtomic
@@ -2594,5 +2594,34 @@ class DatabaseSQLTest extends PHPUnit\Framework\TestCase {
 			$this->database->selectFieldValues( 'table', 'table.field', 'conds', __METHOD__ )
 		);
 		$this->assertLastSql( 'SELECT table.field AS value FROM table WHERE conds' );
+	}
+
+	/**
+	 * @covers Wikimedia\Rdbms\Platform\SQLPlatform::isWriteQuery
+	 * @param string $query
+	 * @param bool $res
+	 * @dataProvider provideIsWriteQuery
+	 */
+	public function testIsWriteQuery( string $query, bool $res ) {
+		$this->assertSame( $res, $this->platform->isWriteQuery( $query, 0 ) );
+	}
+
+	/**
+	 * Provider for testIsWriteQuery
+	 * @return array
+	 */
+	public function provideIsWriteQuery(): array {
+		return [
+			[ 'SELECT foo', false ],
+			[ '  SELECT foo FROM bar', false ],
+			[ 'BEGIN', false ],
+			[ 'SHOW EXPLAIN FOR 12;', false ],
+			[ 'USE foobar', false ],
+			[ '(SELECT 1)', false ],
+			[ 'INSERT INTO foo', true ],
+			[ 'TRUNCATE bar', true ],
+			[ 'DELETE FROM baz', true ],
+			[ 'CREATE TABLE foobar', true ]
+		];
 	}
 }

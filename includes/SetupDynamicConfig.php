@@ -199,9 +199,7 @@ unset( $rcMaxAgeDays );
 
 $wgCookiePrefix = strtr( $wgCookiePrefix, '=,; +."\'\\[', '__________' );
 
-if ( $wgEnableEmail ) {
-	$wgUseEnotif = $wgEnotifUserTalk || $wgEnotifWatchlist;
-} else {
+if ( !$wgEnableEmail ) {
 	// Disable all other email settings automatically if $wgEnableEmail
 	// is set to false. - T65678
 	$wgAllowHTMLEmail = false;
@@ -216,7 +214,6 @@ if ( $wgEnableEmail ) {
 	$wgEnotifUserTalk = false;
 	$wgEnotifWatchlist = false;
 	unset( $wgGroupPermissions['user']['sendemail'] );
-	$wgUseEnotif = false;
 	$wgUserEmailUseReplyTo = false;
 	$wgUsersNotifiedOnAllChanges = [];
 }
@@ -243,11 +240,6 @@ $wgDefaultUserOptions['timecorrection'] = "System|$wgLocalTZoffset";
  * @internal
  */
 $wgCanonicalNamespaceNames = NamespaceInfo::CANONICAL_NAMES;
-
-// @todo UGLY UGLY
-if ( is_array( $wgExtraNamespaces ) ) {
-	$wgCanonicalNamespaceNames += $wgExtraNamespaces;
-}
 
 // Hard-deprecate setting $wgDummyLanguageCodes in LocalSettings.php
 if ( count( $wgDummyLanguageCodes ) !== 0 ) {

@@ -2,6 +2,7 @@
 	"@metadata": {
 		"authors": [
 			"Alirezaaa",
+			"Amire80",
 			"Arash71",
 			"DannyS712",
 			"Ebraminio",
@@ -876,8 +877,6 @@
 	"search-file-match": "(تشابه محتوی پرونده)",
 	"search-suggest": "نۀظۀرتان یۀ بیۀ: $1",
 	"search-rewritten": "نمایش نتایج $1. جستجوی به جای $2.",
-	"search-interwiki-caption": "پروژةل خۆئة",
-	"search-interwiki-default": "نتایج از $1 :",
 	"search-interwiki-more": "(فرةتر)",
 	"search-relatedarticle": "مرتبط",
 	"searchrelated": "مرتبط",
@@ -1998,7 +1997,7 @@
 	"isimage": "پیوند پرونده",
 	"whatlinkshere-prev": "{{PLURAL:$1|previous|previous $1}}",
 	"whatlinkshere-next": "{{PLURAL:$1|next|next $1}}",
-	"whatlinkshere-links": "← پیوند",
+	"whatlinkshere-links": "→ پیوند",
 	"whatlinkshere-hideredirs": "$1 تغییرمسیر",
 	"whatlinkshere-hidetrans": "$1 تراگنجانش‌ها",
 	"whatlinkshere-hidelinks": "$1 پیوند",

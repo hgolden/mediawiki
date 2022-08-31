@@ -22,8 +22,10 @@ namespace Wikimedia\Rdbms\Platform;
 use InvalidArgumentException;
 use Psr\Log\LoggerInterface;
 use Psr\Log\NullLogger;
+use RuntimeException;
 use Wikimedia\Assert\Assert;
 use Wikimedia\Rdbms\Database\DbQuoter;
+use Wikimedia\Rdbms\DatabaseDomain;
 use Wikimedia\Rdbms\DBLanguageError;
 use Wikimedia\Rdbms\LikeMatch;
 use Wikimedia\Rdbms\Subquery;
@@ -41,20 +43,23 @@ class SQLPlatform implements ISQLPlatform {
 	protected $tableAliases = [];
 	/** @var string[] Current map of (index alias => index) */
 	protected $indexAliases = [];
-	/** @var string|null */
-	protected $schema;
-	/** @var string */
-	private $prefix;
+	/** @var DatabaseDomain|null */
+	protected $currentDomain;
+	/** @var array|null Current variables use for schema element placeholders */
+	protected $schemaVars;
 	/** @var DbQuoter */
 	protected $quoter;
 	/** @var LoggerInterface */
 	protected $logger;
 
-	public function __construct( DbQuoter $quoter, LoggerInterface $logger = null, $schema = null, $prefix = '' ) {
+	public function __construct(
+		DbQuoter $quoter,
+		LoggerInterface $logger = null,
+		DatabaseDomain $currentDomain = null
+	) {
 		$this->quoter = $quoter;
 		$this->logger = $logger ?? new NullLogger();
-		$this->schema = $schema;
-		$this->prefix = $prefix;
+		$this->currentDomain = $currentDomain;
 	}
 
 	/**
@@ -582,11 +587,15 @@ class SQLPlatform implements ISQLPlatform {
 	}
 
 	public function setPrefix( $prefix ) {
-		$this->prefix = $prefix;
+		$this->currentDomain = new DatabaseDomain(
+			$this->currentDomain->getDatabase(),
+			$this->currentDomain->getSchema(),
+			$prefix
+		);
 	}
 
-	public function setSchema( $schema ) {
-		$this->schema = $schema;
+	public function setCurrentDomain( DatabaseDomain $currentDomain ) {
+		$this->currentDomain = $currentDomain;
 	}
 
 	/**
@@ -750,7 +759,7 @@ class SQLPlatform implements ISQLPlatform {
 	 * @param string|false $alias Alias (optional)
 	 * @return string SQL name for aliased field. Will not alias a field to its own name
 	 */
-	protected function fieldNameWithAlias( $name, $alias = false ) {
+	public function fieldNameWithAlias( $name, $alias = false ) {
 		if ( !$alias || (string)$alias === (string)$name ) {
 			return $name;
 		} else {
@@ -949,7 +958,7 @@ class SQLPlatform implements ISQLPlatform {
 			$this->logger->warning(
 				__METHOD__ . ": use of subqueries is not supported this way",
 				[
-					'exception' => new \RuntimeException(),
+					'exception' => new RuntimeException(),
 					'db_log_category' => 'sql',
 				]
 			);
@@ -986,6 +995,11 @@ class SQLPlatform implements ISQLPlatform {
 	public function qualifiedTableComponents( $name ) {
 		# We reverse the explode so that database.table and table both output the correct table.
 		$dbDetails = explode( '.', $name, 3 );
+		if ( $this->currentDomain ) {
+			$currentDomainPrefix = $this->currentDomain->getTablePrefix();
+		} else {
+			$currentDomainPrefix = null;
+		}
 		if ( count( $dbDetails ) == 3 ) {
 			list( $database, $schema, $table ) = $dbDetails;
 			# We don't want any prefix added in this case
@@ -1006,11 +1020,11 @@ class SQLPlatform implements ISQLPlatform {
 					: $this->relationSchemaQualifier();
 				$prefix = is_string( $this->tableAliases[$table]['prefix'] )
 					? $this->tableAliases[$table]['prefix']
-					: $this->prefix;
+					: $currentDomainPrefix;
 			} else {
 				$database = '';
 				$schema = $this->relationSchemaQualifier(); # Default schema
-				$prefix = $this->prefix; # Default prefix
+				$prefix = $currentDomainPrefix; # Default prefix
 			}
 		}
 
@@ -1019,10 +1033,13 @@ class SQLPlatform implements ISQLPlatform {
 
 	/**
 	 * @stable to override
-	 * @return string Schema to use to qualify relations in queries
+	 * @return string|null Schema to use to qualify relations in queries
 	 */
 	protected function relationSchemaQualifier() {
-		return $this->schema;
+		if ( $this->currentDomain ) {
+			return $this->currentDomain->getSchema();
+		}
+		return null;
 	}
 
 	/**
@@ -1595,5 +1612,474 @@ class SQLPlatform implements ISQLPlatform {
 		} else {
 			throw new DBLanguageError( __METHOD__ . ': expected string or array' );
 		}
+	}
+
+	public function dropTableSqlText( $table ) {
+		// https://mariadb.com/kb/en/drop-table/
+		// https://dev.mysql.com/doc/refman/8.0/en/drop-table.html
+		// https://www.postgresql.org/docs/9.2/sql-truncate.html
+		return "DROP TABLE " . $this->tableName( $table ) . " CASCADE";
+	}
+
+	/**
+	 * @param string $sql SQL query
+	 * @return string|null
+	 */
+	public function getQueryVerb( $sql ) {
+		// Distinguish ROLLBACK from ROLLBACK TO SAVEPOINT
+		return preg_match(
+			'/^\s*(rollback\s+to\s+savepoint|[a-z]+)/i',
+			$sql,
+			$m
+		) ? strtoupper( $m[1] ) : null;
+	}
+
+	/**
+	 * Determine whether a SQL statement is sensitive to isolation level.
+	 *
+	 * A SQL statement is considered transactable if its result could vary
+	 * depending on the transaction isolation level. Operational commands
+	 * such as 'SET' and 'SHOW' are not considered to be transactable.
+	 *
+	 * Main purpose: Used by query() to decide whether to begin a transaction
+	 * before the current query (in DBO_TRX mode, on by default).
+	 *
+	 * @stable to override
+	 * @param string $sql
+	 * @return bool
+	 */
+	public function isTransactableQuery( $sql ) {
+		return !in_array(
+			$this->getQueryVerb( $sql ),
+			[
+				'BEGIN',
+				'ROLLBACK',
+				'ROLLBACK TO SAVEPOINT',
+				'COMMIT',
+				'SET',
+				'SHOW',
+				'CREATE',
+				'ALTER',
+				'USE',
+				'SHOW'
+			],
+			true
+		);
+	}
+
+	/**
+	 * Determine whether a query writes to the DB. When in doubt, this returns true.
+	 *
+	 * Main use cases:
+	 *
+	 * - Subsequent web requests should not need to wait for replication from
+	 *   the primary position seen by this web request, unless this request made
+	 *   changes to the primary DB. This is handled by ChronologyProtector by checking
+	 *   doneWrites() at the end of the request. doneWrites() returns true if any
+	 *   query set lastWriteTime; which query() does based on isWriteQuery().
+	 *
+	 * - Reject write queries to replica DBs, in query().
+	 *
+	 * @param string $sql SQL query
+	 * @param int $flags Query flags to query()
+	 * @return bool
+	 */
+	public function isWriteQuery( $sql, $flags ) {
+		// Check if a SQL wrapper method already flagged the query as a write
+		if (
+			$this->fieldHasBit( $flags, self::QUERY_CHANGE_ROWS ) ||
+			$this->fieldHasBit( $flags, self::QUERY_CHANGE_SCHEMA )
+		) {
+			return true;
+		}
+		// Check if a SQL wrapper method already flagged the query as a non-write
+		if (
+			$this->fieldHasBit( $flags, self::QUERY_CHANGE_NONE ) ||
+			$this->fieldHasBit( $flags, self::QUERY_CHANGE_TRX ) ||
+			$this->fieldHasBit( $flags, self::QUERY_CHANGE_LOCKS )
+		) {
+			return false;
+		}
+		// Treat SELECT queries without FOR UPDATE queries as non-writes. This matches
+		// how MySQL enforces read_only (FOR SHARE and LOCK IN SHADE MODE are allowed).
+		// Handle (SELECT ...) UNION (SELECT ...) queries in a similar fashion.
+		if ( preg_match( '/^\s*\(?SELECT\b/i', $sql ) ) {
+			return (bool)preg_match( '/\bFOR\s+UPDATE\)?\s*$/i', $sql );
+		}
+		// BEGIN and COMMIT queries are considered non-write queries here.
+		// Database backends and drivers (MySQL, MariaDB, php-mysqli) generally
+		// treat these as write queries, in that their results have "affected rows"
+		// as meta data as from writes, instead of "num rows" as from reads.
+		// But, we treat them as non-write queries because when reading data (from
+		// either replica or primary DB) we use transactions to enable repeatable-read
+		// snapshots, which ensures we get consistent results from the same snapshot
+		// for all queries within a request. Use cases:
+		// - Treating these as writes would trigger ChronologyProtector (see method doc).
+		// - We use this method to reject writes to replicas, but we need to allow
+		//   use of transactions on replicas for read snapshots. This is fine given
+		//   that transactions by themselves don't make changes, only actual writes
+		//   within the transaction matter, which we still detect.
+		return !preg_match(
+			'/^\s*(BEGIN|ROLLBACK|COMMIT|SAVEPOINT|RELEASE|SET|SHOW|EXPLAIN|USE)\b/i',
+			$sql
+		);
+	}
+
+	/**
+	 * @param int $flags A bitfield of flags
+	 * @param int $bit Bit flag constant
+	 * @return bool Whether the bit field has the specified bit flag set
+	 */
+	final protected function fieldHasBit( int $flags, int $bit ) {
+		return ( ( $flags & $bit ) === $bit );
+	}
+
+	public function buildExcludedValue( $column ) {
+		/* @see Database::doUpsert() */
+		// This can be treated like a single value since __VALS is a single row table
+		return "(SELECT __$column FROM __VALS)";
+	}
+
+	public function savepointSqlText( $identifier ) {
+		return 'SAVEPOINT ' . $this->addIdentifierQuotes( $identifier );
+	}
+
+	public function releaseSavepointSqlText( $identifier ) {
+		return 'RELEASE SAVEPOINT ' . $this->addIdentifierQuotes( $identifier );
+	}
+
+	public function rollbackToSavepointSqlText( $identifier ) {
+		return 'ROLLBACK TO SAVEPOINT ' . $this->addIdentifierQuotes( $identifier );
+	}
+
+	public function rollbackSqlText() {
+		return 'ROLLBACK';
+	}
+
+	public function dispatchingInsertSqlText( $table, $rows, $options ) {
+		$rows = $this->normalizeRowArray( $rows );
+		if ( !$rows ) {
+			return false;
+		}
+
+		$options = $this->normalizeOptions( $options );
+		if ( $this->isFlagInOptions( 'IGNORE', $options ) ) {
+			return $this->insertNonConflictingSqlText( $table, $rows );
+		} else {
+			return $this->insertSqlText( $table, $rows );
+		}
+	}
+
+	/**
+	 * @param array $rowOrRows A single (field => value) map or a list of such maps
+	 * @return array[] List of (field => value) maps
+	 * @since 1.35
+	 */
+	final protected function normalizeRowArray( array $rowOrRows ) {
+		if ( !$rowOrRows ) {
+			$rows = [];
+		} elseif ( isset( $rowOrRows[0] ) ) {
+			$rows = $rowOrRows;
+		} else {
+			$rows = [ $rowOrRows ];
+		}
+
+		foreach ( $rows as $row ) {
+			if ( !is_array( $row ) ) {
+				throw new DBLanguageError( "Got non-array in row array" );
+			} elseif ( !$row ) {
+				throw new DBLanguageError( "Got empty array in row array" );
+			}
+		}
+
+		return $rows;
+	}
+
+	/**
+	 * Validate and normalize parameters to upsert() or replace()
+	 *
+	 * @param string|string[]|string[][] $uniqueKeys Unique indexes (only one is allowed)
+	 * @param array[] &$rows The row array, which will be replaced with a normalized version.
+	 * @return string[]|null List of columns that defines a single unique index, or null for
+	 *   a legacy fallback to plain insert.
+	 * @since 1.35
+	 */
+	final public function normalizeUpsertParams( $uniqueKeys, &$rows ) {
+		$rows = $this->normalizeRowArray( $rows );
+		if ( !$rows ) {
+			return null;
+		}
+		if ( !$uniqueKeys ) {
+			// For backwards compatibility, allow insertion of rows with no applicable key
+			$this->logger->warning(
+				"upsert/replace called with no unique key",
+				[
+					'exception' => new RuntimeException(),
+					'db_log_category' => 'sql',
+				]
+			);
+			return null;
+		}
+		$identityKey = $this->normalizeUpsertKeys( $uniqueKeys );
+		if ( $identityKey ) {
+			$allDefaultKeyValues = $this->assertValidUpsertRowArray( $rows, $identityKey );
+			if ( $allDefaultKeyValues ) {
+				// For backwards compatibility, allow insertion of rows with all-NULL
+				// values for the unique columns (e.g. for an AUTOINCREMENT column)
+				$this->logger->warning(
+					"upsert/replace called with all-null values for unique key",
+					[
+						'exception' => new RuntimeException(),
+						'db_log_category' => 'sql',
+					]
+				);
+				return null;
+			}
+		}
+		return $identityKey;
+	}
+
+	/**
+	 * @param array|string $conds
+	 * @param string $fname
+	 * @return array
+	 * @since 1.31
+	 */
+	final public function normalizeConditions( $conds, $fname ) {
+		if ( $conds === null || $conds === false ) {
+			$this->logger->warning(
+				__METHOD__
+				. ' called from '
+				. $fname
+				. ' with incorrect parameters: $conds must be a string or an array',
+				[ 'db_log_category' => 'sql' ]
+			);
+			return [];
+		} elseif ( $conds === '' ) {
+			return [];
+		}
+
+		return is_array( $conds ) ? $conds : [ $conds ];
+	}
+
+	/**
+	 * @param string|string[]|string[][] $uniqueKeys Unique indexes (only one is allowed)
+	 * @return string[]|null List of columns that defines a single unique index,
+	 *   or null for a legacy fallback to plain insert.
+	 * @since 1.35
+	 */
+	private function normalizeUpsertKeys( $uniqueKeys ) {
+		if ( is_string( $uniqueKeys ) ) {
+			return [ $uniqueKeys ];
+		} elseif ( !is_array( $uniqueKeys ) ) {
+			throw new DBLanguageError( 'Invalid unique key array' );
+		} else {
+			if ( count( $uniqueKeys ) !== 1 || !isset( $uniqueKeys[0] ) ) {
+				throw new DBLanguageError(
+					"The unique key array should contain a single unique index" );
+			}
+
+			$uniqueKey = $uniqueKeys[0];
+			if ( is_string( $uniqueKey ) ) {
+				// Passing a list of strings for single-column unique keys is too
+				// easily confused with passing the columns of composite unique key
+				$this->logger->warning( __METHOD__ .
+					" called with deprecated parameter style: " .
+					"the unique key array should be a string or array of string arrays",
+					[
+						'exception' => new RuntimeException(),
+						'db_log_category' => 'sql',
+					] );
+				return $uniqueKeys;
+			} elseif ( is_array( $uniqueKey ) ) {
+				return $uniqueKey;
+			} else {
+				throw new DBLanguageError( 'Invalid unique key array entry' );
+			}
+		}
+	}
+
+	/**
+	 * @param array<int,array> $rows Normalized list of rows to insert
+	 * @param string[] $identityKey Columns of the (unique) identity key to UPSERT upon
+	 * @return bool Whether all the rows have NULL/absent values for all identity key columns
+	 * @since 1.37
+	 */
+	final protected function assertValidUpsertRowArray( array $rows, array $identityKey ) {
+		$numNulls = 0;
+		foreach ( $rows as $row ) {
+			foreach ( $identityKey as $column ) {
+				$numNulls += ( isset( $row[$column] ) ? 0 : 1 );
+			}
+		}
+
+		if (
+			$numNulls &&
+			$numNulls !== ( count( $rows ) * count( $identityKey ) )
+		) {
+			throw new DBLanguageError(
+				"NULL/absent values for unique key (" . implode( ',', $identityKey ) . ")"
+			);
+		}
+
+		return (bool)$numNulls;
+	}
+
+	/**
+	 * @param array $set Combined column/literal assignment map and SQL assignment list
+	 * @param string[] $identityKey Columns of the (unique) identity key to UPSERT upon
+	 * @param array<int,array> $rows List of rows to upsert
+	 * @since 1.37
+	 */
+	final public function assertValidUpsertSetArray(
+		array $set,
+		array $identityKey,
+		array $rows
+	) {
+		// Sloppy callers might construct the SET array using the ROW array, leaving redundant
+		// column definitions for identity key columns. Detect this for backwards compatibility.
+		$soleRow = ( count( $rows ) == 1 ) ? reset( $rows ) : null;
+		// Disallow value changes for any columns in the identity key. This avoids additional
+		// insertion order dependencies that are unwieldy and difficult to implement efficiently
+		// in PostgreSQL.
+		foreach ( $set as $k => $v ) {
+			if ( is_string( $k ) ) {
+				// Key is a column name and value is a literal (e.g. string, int, null, ...)
+				if ( in_array( $k, $identityKey, true ) ) {
+					if ( $soleRow && array_key_exists( $k, $soleRow ) && $soleRow[$k] === $v ) {
+						$this->logger->warning(
+							__METHOD__ . " called with redundant assignment to column '$k'",
+							[
+								'exception' => new RuntimeException(),
+								'db_log_category' => 'sql',
+							]
+						);
+					} else {
+						throw new DBLanguageError(
+							"Cannot reassign column '$k' since it belongs to identity key"
+						);
+					}
+				}
+			} elseif ( preg_match( '/^([a-zA-Z0-9_]+)\s*=/', $v, $m ) ) {
+				// Value is of the form "<unquoted alphanumeric column> = <SQL expression>"
+				if ( in_array( $m[1], $identityKey, true ) ) {
+					throw new DBLanguageError(
+						"Cannot reassign column '{$m[1]}' since it belongs to identity key"
+					);
+				}
+			}
+		}
+	}
+
+	/**
+	 * @param array|string $var Field parameter in the style of select()
+	 * @return string|null Column name or null; ignores aliases
+	 */
+	final public function extractSingleFieldFromList( $var ) {
+		if ( is_array( $var ) ) {
+			if ( !$var ) {
+				$column = null;
+			} elseif ( count( $var ) == 1 ) {
+				$column = $var[0] ?? reset( $var );
+			} else {
+				throw new DBLanguageError( __METHOD__ . ': got multiple columns' );
+			}
+		} else {
+			$column = $var;
+		}
+
+		return $column;
+	}
+
+	public function setSchemaVars( $vars ) {
+		$this->schemaVars = is_array( $vars ) ? $vars : null;
+	}
+
+	/**
+	 * Get schema variables. If none have been set via setSchemaVars(), then
+	 * use some defaults from the current object.
+	 *
+	 * @return array
+	 */
+	protected function getSchemaVars() {
+		return $this->schemaVars ?? $this->getDefaultSchemaVars();
+	}
+
+	/**
+	 * Get schema variables to use if none have been set via setSchemaVars().
+	 *
+	 * Override this in derived classes to provide variables for tables.sql
+	 * and SQL patch files.
+	 *
+	 * @stable to override
+	 * @return array
+	 */
+	protected function getDefaultSchemaVars() {
+		return [];
+	}
+
+	/**
+	 * Database-independent variable replacement. Replaces a set of variables
+	 * in an SQL statement with their contents as given by $this->getSchemaVars().
+	 *
+	 * Supports '{$var}' `{$var}` and / *$var* / (without the spaces) style variables.
+	 *
+	 * - '{$var}' should be used for text and is passed through the database's
+	 *   addQuotes method.
+	 * - `{$var}` should be used for identifiers (e.g. table and database names).
+	 *   It is passed through the database's addIdentifierQuotes method which
+	 *   can be overridden if the database uses something other than backticks.
+	 * - / *_* / or / *$wgDBprefix* / passes the name that follows through the
+	 *   database's tableName method.
+	 * - / *i* / passes the name that follows through the database's indexName method.
+	 * - In all other cases, / *$var* / is left unencoded. Except for table options,
+	 *   its use should be avoided. In 1.24 and older, string encoding was applied.
+	 *
+	 * @stable to override
+	 * @param string $ins SQL statement to replace variables in
+	 * @return string The new SQL statement with variables replaced
+	 */
+	public function replaceVars( $ins ) {
+		$vars = $this->getSchemaVars();
+		return preg_replace_callback(
+			'!
+				/\* (\$wgDBprefix|[_i]) \*/ (\w*) | # 1-2. tableName, indexName
+				\'\{\$ (\w+) }\'                  | # 3. addQuotes
+				`\{\$ (\w+) }`                    | # 4. addIdentifierQuotes
+				/\*\$ (\w+) \*/                     # 5. leave unencoded
+			!x',
+			function ( $m ) use ( $vars ) {
+				// Note: Because of <https://bugs.php.net/bug.php?id=51881>,
+				// check for both nonexistent keys *and* the empty string.
+				if ( isset( $m[1] ) && $m[1] !== '' ) {
+					if ( $m[1] === 'i' ) {
+						return $this->indexName( $m[2] );
+					} else {
+						return $this->tableName( $m[2] );
+					}
+				} elseif ( isset( $m[3] ) && $m[3] !== '' && array_key_exists( $m[3], $vars ) ) {
+					return $this->quoter->addQuotes( $vars[$m[3]] );
+				} elseif ( isset( $m[4] ) && $m[4] !== '' && array_key_exists( $m[4], $vars ) ) {
+					return $this->addIdentifierQuotes( $vars[$m[4]] );
+				} elseif ( isset( $m[5] ) && $m[5] !== '' && array_key_exists( $m[5], $vars ) ) {
+					return $vars[$m[5]];
+				} else {
+					return $m[0];
+				}
+			},
+			$ins
+		);
+	}
+
+	public function lockSQLText( $lockName, $timeout ) {
+		throw new RuntimeException( 'locking must be implemented in subclasses' );
+	}
+
+	public function lockIsFreeSQLText( $lockName ) {
+		throw new RuntimeException( 'locking must be implemented in subclasses' );
+	}
+
+	public function unlockSQLText( $lockName ) {
+		throw new RuntimeException( 'locking must be implemented in subclasses' );
 	}
 }

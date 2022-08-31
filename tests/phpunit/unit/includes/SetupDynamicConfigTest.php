@@ -8,7 +8,6 @@ use MediaWiki\Settings\Config\PhpIniSink;
 use MediaWiki\Settings\DynamicDefaultValues;
 use MediaWiki\Settings\SettingsBuilder;
 use MediaWiki\Settings\Source\ReflectionSchemaSource;
-use Wikimedia\AtEase\AtEase;
 
 class SetupDynamicConfigTest extends MediaWikiUnitTestCase {
 	/** @var string */
@@ -122,11 +121,11 @@ class SetupDynamicConfigTest extends MediaWikiUnitTestCase {
 			'WANObjectCaches' => [
 				// XXX Is this duplication really intentional? Isn't the first entry unused?
 				0 => [
-					'class' => 'WANObjectCache',
+					'class' => WANObjectCache::class,
 					'cacheId' => 0,
 				],
 				'mediawiki-main-default' => [
-					'class' => 'WANObjectCache',
+					'class' => WANObjectCache::class,
 					'cacheId' => 0,
 				],
 			],
@@ -169,7 +168,6 @@ class SetupDynamicConfigTest extends MediaWikiUnitTestCase {
 				'backend' => 'local-backend',
 			],
 			'CookiePrefix' => 'my_wiki',
-			'UseEnotif' => false,
 			'Localtimezone' => 'UTC',
 			'LocalTZoffset' => 0,
 			'DBerrorLogTZ' => 'UTC',
@@ -183,9 +181,7 @@ class SetupDynamicConfigTest extends MediaWikiUnitTestCase {
 			'CacheEpoch' => static function (): string {
 				// We need a callback that will be evaluated at test time, because otherwise this
 				// doesn't work on CI for some reason.
-				AtEase::suppressWarnings();
-				$ret = max( '20030516000000', gmdate( 'YmdHis', filemtime( MW_CONFIG_FILE ) ) );
-				AtEase::restoreWarnings();
+				$ret = max( '20030516000000', gmdate( 'YmdHis', @filemtime( MW_CONFIG_FILE ) ) );
 				return $ret;
 			},
 		];
@@ -280,11 +276,11 @@ class SetupDynamicConfigTest extends MediaWikiUnitTestCase {
 				'MainCacheType' => 7,
 				'WANObjectCaches' => [
 					0 => [
-						'class' => 'WANObjectCache',
+						'class' => WANObjectCache::class,
 						'cacheId' => 0,
 					],
 					'mediawiki-main-default' => [
-						'class' => 'WANObjectCache',
+						'class' => WANObjectCache::class,
 						'cacheId' => 7,
 					],
 				],
@@ -296,7 +292,7 @@ class SetupDynamicConfigTest extends MediaWikiUnitTestCase {
 				'MainWANCache' => 'my-cache',
 				// XXX Is this intentional? Customizing MainWANCache without adding it to
 				// WANObjectCaches seems like it will break everything?
-				'WANObjectCaches' => [ [ 'class' => 'WANObjectCache', 'cacheId' => 0 ] ],
+				'WANObjectCaches' => [ [ 'class' => WANObjectCache::class, 'cacheId' => 0 ] ],
 			],
 		];
 		yield '$wgProhibitedFileExtensions set' => [
@@ -652,10 +648,6 @@ class SetupDynamicConfigTest extends MediaWikiUnitTestCase {
 			[ 'CookiePrefix' => 'n=o,t;a l+l.o"w\'e\\d[' ],
 			[ 'CookiePrefix' => 'n_o_t_a_l_l_o_w_e_d_' ],
 		];
-		yield '$wgEnotifUserTalk true' => [
-			[ 'EnotifUserTalk' => true ],
-			[ 'UseEnotif' => true ],
-		];
 		yield '$wgEnableEmail set to false' => [
 			[
 				'EnableEmail' => false,
@@ -671,7 +663,6 @@ class SetupDynamicConfigTest extends MediaWikiUnitTestCase {
 				'EnotifUserTalk' => true,
 				'EnotifWatchlist' => true,
 				'GroupPermissions' => [ 'user' => [ 'sendemail' => true ] ],
-				'UseEnotif' => true,
 				'UserEmailUseReplyTo' => true,
 				'UsersNotifiedOnAllChanges' => [ 'Admin' ],
 			], [
@@ -687,7 +678,6 @@ class SetupDynamicConfigTest extends MediaWikiUnitTestCase {
 				'EnotifUserTalk' => false,
 				'EnotifWatchlist' => false,
 				'GroupPermissions' => [ 'user' => [] ],
-				'UseEnotif' => false,
 				'UserEmailUseReplyTo' => false,
 				'UsersNotifiedOnAllChanges' => [],
 			],
@@ -720,9 +710,9 @@ class SetupDynamicConfigTest extends MediaWikiUnitTestCase {
 			[ 'CanonicalNamespaceNames' => [ NS_MAIN => 'abc' ] ],
 			[],
 		];
-		yield '$wgExtraNamespaces set' => [
+		yield 'Setting $wgExtraNamespaces does not affect $wgCanonicalNamespaceNames' => [
 			[ 'ExtraNamespaces' => [ 100 => 'Extra' ] ],
-			[ 'CanonicalNamespaceNames' => NamespaceInfo::CANONICAL_NAMES + [ 100 => 'Extra' ] ],
+			[],
 		];
 		yield '$wgDummyLanguageCodes set' => [
 			[ 'DummyLanguageCodes' => [ 'qqq' => 'qqqq', 'foo' => 'bar', 'bh' => 'hb' ] ],

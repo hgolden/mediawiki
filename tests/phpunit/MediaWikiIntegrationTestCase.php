@@ -1,11 +1,13 @@
 <?php
 
+use MediaWiki\Linker\LinkTarget;
 use MediaWiki\Logger\LegacyLogger;
 use MediaWiki\Logger\LegacySpi;
 use MediaWiki\Logger\LogCapturingSpi;
 use MediaWiki\Logger\LoggerFactory;
 use MediaWiki\MainConfigNames;
 use MediaWiki\MediaWikiServices;
+use MediaWiki\Page\PageIdentity;
 use MediaWiki\Page\ProperPageIdentity;
 use MediaWiki\Permissions\Authority;
 use MediaWiki\Permissions\UltimateAuthority;
@@ -1052,8 +1054,7 @@ abstract class MediaWikiIntegrationTestCase extends PHPUnit\Framework\TestCase {
 	 *
 	 * The primary use case for this method is to allow changes to global configuration variables
 	 * to take effect on services that get initialized based on these global configuration
-	 * variables. Similarly, it may be necessary to call resetServices() after calling setService(),
-	 * so the newly set service gets picked up by any other service definitions that may use it.
+	 * variables. It is called by setMwGlobals/overrideConfigValues
 	 *
 	 * @see MediaWikiServices::resetServiceForTesting.
 	 *
@@ -1313,19 +1314,7 @@ abstract class MediaWikiIntegrationTestCase extends PHPUnit\Framework\TestCase {
 		return true;
 	}
 
-	/**
-	 * Replace legacy global $wgParser with a fresh one so it picks up any
-	 * config changes. It's deprecated, but we still support it for now.
-	 */
 	private static function resetLegacyGlobals() {
-		// phpcs:ignore MediaWiki.Usage.DeprecatedGlobalVariables.Deprecated$wgParser
-		global $wgParser;
-		// We don't have to replace the parser if it wasn't unstubbed
-		if ( !( $wgParser instanceof StubObject ) ) {
-			$wgParser = new StubObject( 'wgParser', static function () {
-				return MediaWikiServices::getInstance()->getParser();
-			} );
-		}
 		ParserOptions::clearStaticCache();
 	}
 
@@ -2171,10 +2160,10 @@ abstract class MediaWikiIntegrationTestCase extends PHPUnit\Framework\TestCase {
 	 *
 	 * This should only be used for small data sets.
 	 *
-	 * @param IDatabase $source
-	 * @param IDatabase $target
+	 * @param IMaintainableDatabase $source
+	 * @param IMaintainableDatabase $target
 	 */
-	public function copyTestData( IDatabase $source, IDatabase $target ) {
+	public function copyTestData( IMaintainableDatabase $source, IMaintainableDatabase $target ) {
 		if ( $this->db->getType() === 'sqlite' ) {
 			// SQLite uses a non-temporary copy of the searchindex table for testing,
 			// which gets deleted and re-created when setting up the secondary connection,
@@ -2541,11 +2530,11 @@ abstract class MediaWikiIntegrationTestCase extends PHPUnit\Framework\TestCase {
 
 	/**
 	 * Edits or creates a page/revision
-	 * @param string|Title|WikiPage $page the page to edit
+	 * @param string|PageIdentity|LinkTarget|WikiPage $page the page to edit
 	 * @param string|Content $content the new content of the page
 	 * @param string $summary Optional summary string for the revision
 	 * @param int $defaultNs Optional namespace id
-	 * @param Authority|null $performer If null, static::getTestUser()->getUser() is used.
+	 * @param Authority|null $performer If null, static::getTestUser()->getAuthority() is used.
 	 * @return Status Object as returned by WikiPage::doUserEditContent()
 	 * @throws MWException If this test cases's needsDB() method doesn't return true.
 	 *         Test cases can use "@group Database" to enable database test support,
@@ -2564,22 +2553,28 @@ abstract class MediaWikiIntegrationTestCase extends PHPUnit\Framework\TestCase {
 				' method should return true. Use @group Database or $this->tablesUsed.' );
 		}
 
+		$services = $this->getServiceContainer();
 		if ( $page instanceof WikiPage ) {
 			$title = $page->getTitle();
-		} elseif ( $page instanceof Title ) {
-			$title = $page;
-			$page = WikiPage::factory( $title );
+		} elseif ( $page instanceof PageIdentity ) {
+			$page = $services->getWikiPageFactory()->newFromTitle( $page );
+			$title = $page->getTitle();
+		} elseif ( $page instanceof LinkTarget ) {
+			$page = $services->getWikiPageFactory()->newFromLinkTarget( $page );
+			$title = $page->getTitle();
 		} else {
-			$title = Title::newFromText( $page, $defaultNs );
-			$page = WikiPage::factory( $title );
+			$title = $services->getTitleFactory()->newFromText( $page, $defaultNs );
+			$page = $services->getWikiPageFactory()->newFromTitle( $title );
 		}
 
 		if ( $performer === null ) {
-			$performer = static::getTestUser()->getUser();
+			$performer = static::getTestUser()->getAuthority();
 		}
 
 		if ( is_string( $content ) ) {
-			$content = ContentHandler::makeContent( $content, $title );
+			$content = $services->getContentHandlerFactory()
+				->getContentHandler( $title->getContentModel() )
+				->unserializeContent( $content );
 		}
 
 		return $page->doUserEditContent(

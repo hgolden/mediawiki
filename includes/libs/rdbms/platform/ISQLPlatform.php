@@ -46,6 +46,29 @@ interface ISQLPlatform {
 	/** @var string Unconditional update/delete of whole table */
 	public const ALL_ROWS = '*';
 
+	/** @var int Idiom for "no special flags" */
+	public const QUERY_NORMAL = 0;
+	/** @var int Ignore query errors and return false when they happen */
+	public const QUERY_SILENCE_ERRORS = 1; // b/c for 1.32 query() argument; (int)true = 1
+	/** Track a TEMPORARY table CREATE as if it was for a permanent table (for testing) */
+	public const QUERY_PSEUDO_PERMANENT = 2;
+	/** @var int Enforce that a query does not make effective writes */
+	public const QUERY_REPLICA_ROLE = 4;
+	/** @var int Ignore the current presence of any DBO_TRX flag */
+	public const QUERY_IGNORE_DBO_TRX = 8;
+	/** @var int Do not try to retry the query if the connection was lost */
+	public const QUERY_NO_RETRY = 16;
+	/** @var int Query is a read-only Data Query Language query */
+	public const QUERY_CHANGE_NONE = 32;
+	/** @var int Query is a Transaction Control Language command (BEGIN, USE, SET, ...) */
+	public const QUERY_CHANGE_TRX = 64 | self::QUERY_IGNORE_DBO_TRX;
+	/** @var int Query is a Data Manipulation Language command (INSERT, DELETE, LOCK, ...) */
+	public const QUERY_CHANGE_ROWS = 128;
+	/** @var int Query is a Data Definition Language command */
+	public const QUERY_CHANGE_SCHEMA = 256 | self::QUERY_IGNORE_DBO_TRX;
+	/** @var int Query is a command for advisory locks */
+	public const QUERY_CHANGE_LOCKS = 512 | self::QUERY_IGNORE_DBO_TRX;
+
 	/**
 	 * @param string|int $field
 	 * @return string
@@ -461,25 +484,36 @@ interface ISQLPlatform {
 	public function tableName( $name, $format = 'quoted' );
 
 	/**
-	 * Fetch a number of table names into an array
-	 * This is handy when you need to construct SQL for joins
+	 * Fetch a number of table names into an associative array
 	 *
-	 * Example:
-	 * list( $user, $watchlist ) = $dbr->tableNames( 'user', 'watchlist' ) );
+	 * Much like {@link tableName()}, this is only needed when calling
+	 * {@link query()} directly. Prefer calling other methods,
+	 * or using {@link SelectQueryBuilder}.
+	 *
+	 * Theoretical example (which really does not require raw SQL):
+	 * [ 'user' => $user, 'watchlist' => $watchlist ] =
+	 *     $dbr->tableNames( 'user', 'watchlist' );
 	 * $sql = "SELECT wl_namespace, wl_title FROM $watchlist, $user
 	 *         WHERE wl_user=user_id AND wl_user=$nameWithQuotes";
 	 *
 	 * @param string ...$tables
 	 * @return array
+	 * @deprecated since 1.39; if you must format table names,
+	 * write several calls to {@link tableName} or use {@link tableNamesN}
+	 * instead of calling this function.
 	 */
 	public function tableNames( ...$tables );
 
 	/**
-	 * Fetch a number of table names into an zero-indexed numerical array
-	 * This is handy when you need to construct SQL for joins
+	 * Fetch a number of table names into a zero-indexed numerical array
 	 *
-	 * Example:
-	 * list( $user, $watchlist ) = $dbr->tableNamesN( 'user', 'watchlist' );
+	 * Much like {@link tableName()}, this is only needed when calling
+	 * {@link query()} directly. It is slightly more convenient than
+	 * {@link tableNames()}, but you should still prefer calling other
+	 * methods, or using {@link SelectQueryBuilder}.
+	 *
+	 * Theoretical example (which really does not require raw SQL):
+	 * [ $user, $watchlist ] = $dbr->tableNamesN( 'user', 'watchlist' );
 	 * $sql = "SELECT wl_namespace,wl_title FROM $watchlist,$user
 	 *         WHERE wl_user=user_id AND wl_user=$nameWithQuotes";
 	 *
@@ -566,4 +600,32 @@ interface ISQLPlatform {
 		$options = [],
 		$join_conds = []
 	);
+
+	/**
+	 * Build a reference to a column value from the conflicting proposed upsert() row.
+	 *
+	 * The reference comes in the form of an alias, function, or parenthesized SQL expression.
+	 * It can be used in upsert() SET expressions to handle the merging of column values between
+	 * each conflicting pair of existing and proposed rows. Such proposed rows are said to have
+	 * been "excluded" from insertion in favor of updating the existing row.
+	 *
+	 * This is useful for multi-row upserts() since the proposed values cannot just be included
+	 * as literals in the SET expressions.
+	 *
+	 * @see IDatabase::upsert()
+	 *
+	 * @param string $column Column name
+	 * @return string SQL expression returning a scalar
+	 * @since 1.39
+	 */
+	public function buildExcludedValue( $column );
+
+	/**
+	 * Set schema variables to be used when streaming commands from SQL files or stdin
+	 *
+	 * Variables appear as SQL comments and are substituted by their corresponding values
+	 *
+	 * @param array|null $vars Map of (variable => value) or null to use the defaults
+	 */
+	public function setSchemaVars( $vars );
 }

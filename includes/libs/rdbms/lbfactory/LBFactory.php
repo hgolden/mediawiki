@@ -1,7 +1,5 @@
 <?php
 /**
- * Generator and manager of database load balancing objects
- *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
  * the Free Software Foundation; either version 2 of the License, or
@@ -18,9 +16,7 @@
  * http://www.gnu.org/copyleft/gpl.html
  *
  * @file
- * @ingroup Database
  */
-
 namespace Wikimedia\Rdbms;
 
 use BagOStuff;
@@ -39,7 +35,7 @@ use Wikimedia\RequestTimeout\CriticalSectionProvider;
 use Wikimedia\ScopedCallback;
 
 /**
- * An interface for generating database load balancers
+ * @see ILBFactory
  * @ingroup Database
  */
 abstract class LBFactory implements ILBFactory {
@@ -128,7 +124,38 @@ abstract class LBFactory implements ILBFactory {
 	private static $loggerFields =
 		[ 'replLogger', 'connLogger', 'queryLogger', 'perfLogger' ];
 
+	/**
+	 * @var callable
+	 */
+	private $configCallback = null;
+
+	/**
+	 * @var array
+	 */
+	private $currentConfig;
+
 	public function __construct( array $conf ) {
+		$this->configure( $conf );
+
+		if ( isset( $conf['configCallback'] ) ) {
+			$this->configCallback = $conf['configCallback'];
+		}
+
+		$this->requestInfo = [
+			'IPAddress' => $_SERVER['REMOTE_ADDR'] ?? '',
+			'UserAgent' => $_SERVER['HTTP_USER_AGENT'] ?? '',
+			// Headers application can inject via LBFactory::setRequestInfo()
+			'ChronologyProtection' => null,
+			'ChronologyClientId' => null, // prior $cpClientId value from LBFactory::shutdown()
+			'ChronologyPositionIndex' => null // prior $cpIndex value from LBFactory::shutdown()
+		];
+	}
+
+	/**
+	 * @param array $conf
+	 * @return void
+	 */
+	protected function configure( array $conf ): void {
 		$this->localDomain = isset( $conf['localDomain'] )
 			? DatabaseDomain::newFromId( $conf['localDomain'] )
 			: DatabaseDomain::newUnspecified();
@@ -143,13 +170,13 @@ abstract class LBFactory implements ILBFactory {
 		$this->wanCache = $conf['wanCache'] ?? WANObjectCache::newEmpty();
 
 		foreach ( self::$loggerFields as $key ) {
-			$this->$key = $conf[$key] ?? new NullLogger();
+			$this->$key = $conf[ $key ] ?? new NullLogger();
 		}
 		$this->errorLogger = $conf['errorLogger'] ?? static function ( Throwable $e ) {
-			trigger_error( get_class( $e ) . ': ' . $e->getMessage(), E_USER_WARNING );
+				trigger_error( get_class( $e ) . ': ' . $e->getMessage(), E_USER_WARNING );
 		};
 		$this->deprecationLogger = $conf['deprecationLogger'] ?? static function ( $msg ) {
-			trigger_error( $msg, E_USER_DEPRECATED );
+				trigger_error( $msg, E_USER_DEPRECATED );
 		};
 
 		$this->profiler = $conf['profiler'] ?? null;
@@ -157,15 +184,6 @@ abstract class LBFactory implements ILBFactory {
 		$this->statsd = $conf['statsdDataFactory'] ?? new NullStatsdDataFactory();
 
 		$this->csProvider = $conf['criticalSectionProvider'] ?? null;
-
-		$this->requestInfo = [
-			'IPAddress' => $_SERVER[ 'REMOTE_ADDR' ] ?? '',
-			'UserAgent' => $_SERVER['HTTP_USER_AGENT'] ?? '',
-			// Headers application can inject via LBFactory::setRequestInfo()
-			'ChronologyProtection' => null,
-			'ChronologyClientId' => null, // prior $cpClientId value from LBFactory::shutdown()
-			'ChronologyPositionIndex' => null // prior $cpIndex value from LBFactory::shutdown()
-		];
 
 		$this->cliMode = $conf['cliMode'] ?? ( PHP_SAPI === 'cli' || PHP_SAPI === 'phpdbg' );
 		$this->agent = $conf['agent'] ?? '';
@@ -175,6 +193,8 @@ abstract class LBFactory implements ILBFactory {
 
 		static $nextTicket;
 		$this->ticket = $nextTicket = ( is_int( $nextTicket ) ? $nextTicket++ : mt_rand() );
+
+		$this->currentConfig = $conf;
 	}
 
 	public function destroy() {
@@ -184,6 +204,72 @@ abstract class LBFactory implements ILBFactory {
 		foreach ( $this->getLBsForOwner() as $lb ) {
 			$lb->disable( __METHOD__ );
 		}
+	}
+
+	/**
+	 * Reload config using the callback passed defined $config['configCallback'].
+	 *
+	 * If the config returned by the callback is different from the existing config,
+	 * this calls reconfigure() on all load balancers, which causes them to invalidate
+	 * any existing connections and re-connect using the new configuration.
+	 *
+	 * @note This invalidates the current transaction ticket.
+	 *
+	 * @warning This must only be called in top level code such as the execute()
+	 * method of a maintenance script. Any database connection in use when this
+	 * method is called will become defunct.
+	 *
+	 * @return bool true if the config changed.
+	 */
+	public function autoReconfigure(): bool {
+		if ( !$this->configCallback ) {
+			return false;
+		}
+
+		$conf = ( $this->configCallback )();
+		if ( !$conf ) {
+			return false;
+		}
+
+		return $this->reconfigure( $conf );
+	}
+
+	/**
+	 * Reconfigure using the given config array.
+	 * Any fields omitted from $conf will be taken from the current config.
+	 *
+	 * If the config changed, this calls reconfigure() on all load balancers,
+	 * which causes them to close all existing connections.
+	 *
+	 * @note This invalidates the current transaction ticket.
+	 *
+	 * @warning This must only be called in top level code such as the execute()
+	 * method of a maintenance script. Any database connection in use when this
+	 * method is called will become defunct.
+	 *
+	 * @since 1.39
+	 *
+	 * @param array $conf A configuration array, using the same structure as
+	 *        the one passed to the constructor (see also $wgLBFactoryConf).
+	 *
+	 * @return bool true if the config changed.
+	 */
+	public function reconfigure( array $conf ): bool {
+		if ( !$conf ) {
+			return false;
+		}
+		if ( $conf['servers'] == $this->currentConfig['servers'] ) {
+			return false;
+		}
+
+		$this->connLogger->notice( 'Reconfiguring LBFactory!' );
+		$this->configure( $conf );
+
+		foreach ( $this->getLBsForOwner() as $lb ) {
+			$lb->reconfigure( $conf );
+		}
+
+		return true;
 	}
 
 	public function getLocalDomainID() {
@@ -232,7 +318,7 @@ abstract class LBFactory implements ILBFactory {
 
 		$chronProt = $this->getChronologyProtector();
 		if ( ( $flags & self::SHUTDOWN_NO_CHRONPROT ) != self::SHUTDOWN_NO_CHRONPROT ) {
-			$this->shutdownChronologyProtector( $chronProt, $workCallback, $cpIndex );
+			$this->shutdownChronologyProtector( $chronProt, $cpIndex );
 			$this->replLogger->debug( __METHOD__ . ': finished ChronologyProtector shutdown' );
 		}
 		$cpClientId = $chronProt->getClientId();
@@ -619,32 +705,17 @@ abstract class LBFactory implements ILBFactory {
 	 * Get and record all of the staged DB positions into persistent memory storage
 	 *
 	 * @param ChronologyProtector $cp
-	 * @param callable|null $workCallback Work to do instead of waiting on syncing positions
 	 * @param int|null &$cpIndex DB position key write counter; incremented on update [returned]
 	 */
 	protected function shutdownChronologyProtector(
-		ChronologyProtector $cp, $workCallback, &$cpIndex = null
+		ChronologyProtector $cp, &$cpIndex = null
 	) {
 		// Remark all of the relevant DB primary positions
 		foreach ( $this->getLBsForOwner() as $lb ) {
 			$cp->stageSessionReplicationPosition( $lb );
 		}
 		// Write the positions to the persistent stash
-		$unsavedPositions = $cp->persistSessionReplicationPositions( $cpIndex );
-		if ( $unsavedPositions && $workCallback ) {
-			// Invoke callback in case it did not cache the result yet
-			$workCallback();
-		}
-		// If the positions failed to write to the stash, then wait on the local datacenter
-		// replica DBs to catch up before sending an HTTP response. As long as the request that
-		// caused such DB writes occurred in the primary datacenter, and clients are temporarily
-		// pinned to the primary datacenter after causing DB writes, then this should suffice.
-		foreach ( $this->getLBsForOwner() as $lb ) {
-			$primaryName = $lb->getServerName( $lb->getWriterIndex() );
-			if ( isset( $unsavedPositions[$primaryName] ) ) {
-				$lb->waitForAll( $unsavedPositions[$primaryName] );
-			}
-		}
+		$cp->persistSessionReplicationPositions( $cpIndex );
 	}
 
 	/**

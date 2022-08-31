@@ -30,10 +30,10 @@ use Wikimedia\ScopedCallback;
  * This group deals with database interface functions
  * and query specifics/optimisations.
  */
+
 /**
  * Basic database interface for live and lazy-loaded relation database handles
  *
- * @note IDatabase and DBConnRef should be updated to reflect any changes
  * @ingroup Database
  */
 interface IDatabase extends ISQLPlatform, DbQuoter {
@@ -101,29 +101,6 @@ interface IDatabase extends ISQLPlatform, DbQuoter {
 	/** @var int Enable compression in connection protocol */
 	public const DBO_COMPRESS = 512;
 
-	/** @var int Idiom for "no special flags" */
-	public const QUERY_NORMAL = 0;
-	/** @var int Ignore query errors and return false when they happen */
-	public const QUERY_SILENCE_ERRORS = 1; // b/c for 1.32 query() argument; (int)true = 1
-	/** Track a TEMPORARY table CREATE as if it was for a permanent table (for testing) */
-	public const QUERY_PSEUDO_PERMANENT = 2;
-	/** @var int Enforce that a query does not make effective writes */
-	public const QUERY_REPLICA_ROLE = 4;
-	/** @var int Ignore the current presence of any DBO_TRX flag */
-	public const QUERY_IGNORE_DBO_TRX = 8;
-	/** @var int Do not try to retry the query if the connection was lost */
-	public const QUERY_NO_RETRY = 16;
-	/** @var int Query is a read-only Data Query Language query */
-	public const QUERY_CHANGE_NONE = 32;
-	/** @var int Query is a Transaction Control Language command (BEGIN, USE, SET, ...) */
-	public const QUERY_CHANGE_TRX = 64 | self::QUERY_IGNORE_DBO_TRX;
-	/** @var int Query is a Data Manipulation Language command (INSERT, DELETE, LOCK, ...) */
-	public const QUERY_CHANGE_ROWS = 128;
-	/** @var int Query is a Data Definition Language command */
-	public const QUERY_CHANGE_SCHEMA = 256 | self::QUERY_IGNORE_DBO_TRX;
-	/** @var int Query is a command for advisory locks */
-	public const QUERY_CHANGE_LOCKS = 512 | self::QUERY_IGNORE_DBO_TRX;
-
 	/** Flag to return the lock acquisition timestamp (null if not acquired) */
 	public const LOCK_TIMESTAMP = 1;
 
@@ -137,13 +114,13 @@ interface IDatabase extends ISQLPlatform, DbQuoter {
 	/** @var string Field for getLBInfo()/setLBInfo() */
 	public const LB_READ_ONLY_REASON = 'readOnlyReason';
 
-	/** @var string primary DB server than can stream OLTP updates to replica servers */
+	/** @var string Primary server than can stream writes to replica servers */
 	public const ROLE_STREAMING_MASTER = 'streaming-master';
-	/** @var string Replica server that streams OLTP updates from the primary DB server */
+	/** @var string Replica server that receives writes from a primary server */
 	public const ROLE_STREAMING_REPLICA = 'streaming-replica';
-	/** @var string Replica server of a static dataset that does not get OLTP updates */
+	/** @var string Replica server within a static dataset */
 	public const ROLE_STATIC_CLONE = 'static-clone';
-	/** @var string Unknown replication topology role */
+	/** @var string Server with unknown topology role */
 	public const ROLE_UNKNOWN = 'unknown';
 
 	/**
@@ -180,19 +157,6 @@ interface IDatabase extends ISQLPlatform, DbQuoter {
 	 * @since 1.34
 	 */
 	public function getTopologyRole();
-
-	/**
-	 * Get the readable name of the sole root primary DB server for the replication topology
-	 *
-	 * A replication topology defines which servers can originate changes to a given dataset
-	 * and how those changes propagate among database servers. It is assumed that the server
-	 * only participates in the replication of a single relevant dataset.
-	 *
-	 * @return string|null Readable server name; null if unknown or if co-primaries are defined
-	 * @throws DBQueryError
-	 * @since 1.37
-	 */
-	public function getTopologyRootPrimary();
 
 	/**
 	 * Gets the current transaction level.
@@ -824,38 +788,6 @@ interface IDatabase extends ISQLPlatform, DbQuoter {
 	);
 
 	/**
-	 * Determines whether a field exists in a table
-	 *
-	 * @param string $table Table name
-	 * @param string $field Field to check on that table
-	 * @param string $fname Calling function name (optional)
-	 * @return bool Whether $table has field $field
-	 * @throws DBError If an error occurs, {@see query}
-	 */
-	public function fieldExists( $table, $field, $fname = __METHOD__ );
-
-	/**
-	 * Determines whether an index exists
-	 *
-	 * @param string $table
-	 * @param string $index
-	 * @param string $fname
-	 * @return bool|null
-	 * @throws DBError If an error occurs, {@see query}
-	 */
-	public function indexExists( $table, $index, $fname = __METHOD__ );
-
-	/**
-	 * Query whether a given table exists
-	 *
-	 * @param string $table
-	 * @param string $fname
-	 * @return bool
-	 * @throws DBError If an error occurs, {@see query}
-	 */
-	public function tableExists( $table, $fname = __METHOD__ );
-
-	/**
 	 * Insert row(s) into a table, in the provided order
 	 *
 	 * @param string $table Table name
@@ -901,25 +833,6 @@ interface IDatabase extends ISQLPlatform, DbQuoter {
 	 * @throws DBError If an error occurs, {@see query}
 	 */
 	public function update( $table, $set, $conds, $fname = __METHOD__, $options = [] );
-
-	/**
-	 * Build a reference to a column value from the conflicting proposed upsert() row.
-	 *
-	 * The reference comes in the form of an alias, function, or parenthesized SQL expression.
-	 * It can be used in upsert() SET expressions to handle the merging of column values between
-	 * each conflicting pair of existing and proposed rows. Such proposed rows are said to have
-	 * been "excluded" from insertion in favor of updating the existing row.
-	 *
-	 * This is useful for multi-row upserts() since the proposed values cannot just be included
-	 * as literals in the SET expressions.
-	 *
-	 * @see IDatabase::upsert()
-	 *
-	 * @param string $column Column name
-	 * @return string SQL expression returning a scalar
-	 * @since 1.39
-	 */
-	public function buildExcludedValue( $column );
 
 	/**
 	 * Returns true if DBs are assumed to be on potentially different servers
@@ -1752,15 +1665,6 @@ interface IDatabase extends ISQLPlatform, DbQuoter {
 	 * @throws DBError If an error occurs, {@see query}
 	 */
 	public function setSessionOptions( array $options );
-
-	/**
-	 * Set schema variables to be used when streaming commands from SQL files or stdin
-	 *
-	 * Variables appear as SQL comments and are substituted by their corresponding values
-	 *
-	 * @param array|null $vars Map of (variable => value) or null to use the defaults
-	 */
-	public function setSchemaVars( $vars );
 
 	/**
 	 * Check to see if a named lock is not locked by any thread (non-blocking)

@@ -29,10 +29,10 @@
 use MediaWiki\Interwiki\ClassicInterwikiLookup;
 use MediaWiki\MainConfigNames;
 use MediaWiki\MediaWikiServices;
+use MediaWiki\Parser\ParserOutputFlags;
 use MediaWiki\Revision\MutableRevisionRecord;
 use MediaWiki\Revision\RevisionRecord;
 use MediaWiki\Revision\SlotRecord;
-use MediaWiki\Tests\TestMode as ParserTestMode;
 use Psr\Log\NullLogger;
 use Wikimedia\Assert\Assert;
 use Wikimedia\Parsoid\Config\PageConfig;
@@ -46,6 +46,7 @@ use Wikimedia\Parsoid\ParserTests\RawHTML as ParsoidRawHTML;
 use Wikimedia\Parsoid\ParserTests\StyleTag as ParsoidStyleTag;
 use Wikimedia\Parsoid\ParserTests\Test as ParserTest;
 use Wikimedia\Parsoid\ParserTests\TestFileReader;
+use Wikimedia\Parsoid\ParserTests\TestMode as ParserTestMode;
 use Wikimedia\Parsoid\Parsoid;
 use Wikimedia\Parsoid\Utils\ContentUtils;
 use Wikimedia\Parsoid\Utils\DOMCompat;
@@ -155,6 +156,14 @@ class ParserTestRunner {
 	private $defaultTitle;
 
 	/**
+	 * Did some Parsoid test pass where it was expected to fail?
+	 * This can happen if the test failure is recorded in the -knownFailures.json file
+	 * but the test result changed, or functionality changed that causes tests to pass.
+	 * @var bool
+	 */
+	public $unexpectedTestPasses = false;
+
+	/**
 	 * Table name prefix.
 	 */
 	public const DB_PREFIX = 'parsertest_';
@@ -219,7 +228,6 @@ class ParserTestRunner {
 			'knownFailures' => true,
 			'updateKnownFailures' => false,
 			'changetree' => null,
-			'selser' => true, // Test.php in Parsoid accesses this
 			// Options can also match those in ParserTestModes::TEST_MODES
 			// but we don't need to initialize those here; they will be
 			// accessed via $this->requestedTestModes instead.
@@ -1094,11 +1102,7 @@ class ParserTestRunner {
 		// failing mode, which can make diffs harder to verify when
 		// failing modes change.
 		ksort( $testKnownFailures );
-		$contents = json_encode(
-			$testKnownFailures,
-			JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES |
-			JSON_FORCE_OBJECT | JSON_UNESCAPED_UNICODE
-		) . "\n";
+		$contents = FormatJson::encode( $testKnownFailures, "\t", FormatJson::ALL_OK ) . "\n";
 
 		if ( file_exists( $testFileInfo->knownFailuresPath ) ) {
 			$old = file_get_contents( $testFileInfo->knownFailuresPath );
@@ -1107,7 +1111,7 @@ class ParserTestRunner {
 		}
 
 		if ( $testFileInfo->knownFailuresPath && $old !== $contents ) {
-			error_log( "Updating known failures file: {$testFileInfo->knownFailuresPath}" );
+			$this->recorder->warning( "Updating known failures file: {$testFileInfo->knownFailuresPath}" );
 			file_put_contents( $testFileInfo->knownFailuresPath, $contents );
 		}
 	}
@@ -1293,9 +1297,24 @@ class ParserTestRunner {
 		}
 
 		if ( isset( $output ) && isset( $opts['showflags'] ) ) {
-			$actualFlags = array_keys( TestingAccessWrapper::newFromObject( $output )->mFlags );
+			$actualFlags = [];
+			foreach ( ParserOutputFlags::cases() as $name ) {
+				if ( $output->getOutputFlag( $name ) ) {
+					$actualFlags[] = $name;
+				}
+			}
 			sort( $actualFlags );
 			$out .= "\nflags=" . implode( ', ', $actualFlags );
+			# In 1.21 we deprecated the use of arbitrary keys for
+			# ParserOutput::setFlag() by extensions; if we find anyone
+			# still doing that complain about it.
+			$oldFlags = array_diff_key(
+				TestingAccessWrapper::newFromObject( $output )->mFlags,
+				array_fill_keys( ParserOutputFlags::cases(), true )
+			);
+			if ( $oldFlags ) {
+				wfDeprecated( 'Arbitrary flags in ParserOutput', '1.39' );
+			}
 		}
 
 		ScopedCallback::consume( $teardownGuard );
@@ -1395,39 +1414,48 @@ class ParserTestRunner {
 		}
 
 		if ( !$this->options['knownFailures'] ) {
-			// Ignore known failures
 			$expectedFailure = null;
 		} else {
 			$expectedFailure = $test->knownFailures["$mode"] ?? null;
 		}
-		if ( $expectedFailure !== null ) {
-			$actual = $rawActual;
-			$expected = $expectedFailure;
-		} else {
-			if ( is_callable( $rawExpected ) ) {
-				$rawExpected = $rawExpected();
-			}
-			$standalone = false; // We're testing in integrated mode
-			list( $actual, $expected ) = $normalizer( $rawActual, $rawExpected, $standalone );
+
+		$expectedToFail = $expectedFailure !== null;
+		$knownFailureChanged = $expectedToFail && $expectedFailure !== $rawActual;
+
+		if ( is_callable( $rawExpected ) ) {
+			$rawExpected = $rawExpected();
+		}
+		list( $actual, $expected ) = $normalizer( $rawActual, $rawExpected, false /* standalone */ );
+		$passed = $actual === $expected;
+
+		$unexpectedPass = $expectedToFail && $passed;
+		$unexpectedFail = !$expectedToFail && !$passed;
+
+		if ( $unexpectedPass ) {
+			$this->recorder->warning( "{$test->testName}: $mode: EXPECTED TO FAIL, BUT PASSED!" );
 		}
 
-		if ( $this->options['updateKnownFailures'] && $actual !== $expected ) {
-			if ( $expectedFailure === null ) {
-				$test->knownFailures["$mode"] = $rawActual;
+		if ( $this->options['updateKnownFailures'] && (
+			$knownFailureChanged || $unexpectedFail || $unexpectedPass
+		) ) {
+			if ( $unexpectedPass ) {
+				unset( $test->knownFailures["$mode"] );
 			} else {
-				if ( is_callable( $rawExpected ) ) {
-					$rawExpected = $rawExpected();
+				if ( $knownFailureChanged ) {
+					$this->recorder->warning( "{$test->testName}: $mode: KNOWN FAILURE CHANGED!" );
 				}
-				list( $actual, $expected ) = $normalizer( $rawActual, $rawExpected );
-				if ( $actual === $expected ) {
-					wfDebug( "$mode: EXPECTED TO FAIL, BUT PASSED!" );
-					// Expected to fail, but passed!
-					unset( $test->knownFailures["$mode"] );
-				} else {
-					wfDebug( "$mode: KNOWN FAILURE CHANGED!" );
-					$test->knownFailures["$mode"] = $rawActual;
-				}
+				$test->knownFailures["$mode"] = $rawActual;
 			}
+		}
+
+		if ( $unexpectedPass ) {
+			if ( !$this->options['updateKnownFailures'] ) {
+				$this->unexpectedTestPasses = true;
+			}
+		} elseif ( $expectedToFail && !$knownFailureChanged ) {
+			// Don't flag failures noisily when nothing really changed
+			$expected = $expectedFailure;
+			$actual = $rawActual;
 		}
 
 		return new ParserTestResult( $test, $mode, $expected, $actual );
@@ -2098,7 +2126,7 @@ class ParserTestRunner {
 		global $wgDBprefix;
 
 		$lb = MediaWikiServices::getInstance()->getDBLoadBalancer();
-		$this->db = $lb->getConnection( DB_PRIMARY );
+		$this->db = $lb->getConnectionInternal( DB_PRIMARY );
 
 		$suspiciousPrefixes = [ self::DB_PREFIX, MediaWikiIntegrationTestCase::DB_PREFIX ];
 		if ( in_array( $wgDBprefix, $suspiciousPrefixes ) ) {
@@ -2563,7 +2591,18 @@ class ParserTestRunner {
 		// get a reference to the mock object.
 		if ( $this->disableSaveParse ) {
 			$services->getMessageCache()->getParser();
-			$restore = $this->executeSetupSnippets( [ 'wgParser' => new ParserTestMockParser ] );
+			$services->disableService( 'Parser' );
+			$services->disableService( 'ParserFactory' );
+			$services->redefineService(
+				'Parser',
+				static function () {
+					return new ParserTestMockParser;
+				}
+			);
+			$restore = static function () {
+				MediaWikiServices::getInstance()->resetServiceForTesting( 'Parser' );
+				MediaWikiServices::getInstance()->resetServiceForTesting( 'ParserFactory' );
+			};
 		} else {
 			$restore = false;
 		}

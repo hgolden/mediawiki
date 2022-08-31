@@ -95,8 +95,8 @@ CLDRPluralRuleParser:
 
 codex:
   type: tar
-  src: https://registry.npmjs.org/@wikimedia/codex/-/codex-0.1.0-alpha.8.tgz
-  integrity: sha512-oDnyYAZG2ecUsSsPVN18bztnsv19xXzxDetKLKd2CwAFqmKcdgGuPK7WcKfUNzVOMSesYjCFrlpqMpND8TULdQ==
+  src: https://registry.npmjs.org/@wikimedia/codex/-/codex-0.1.0-alpha.10.tgz
+  integrity: sha512-nc8nNI/c89m/dxWRlkCXv5F+zd+OfsP4UwSJnlLnR88nrzctUH9xUDzhTKIiiWn2NyhyGDA2HCIBijul5jRvuQ==
   dest:
     package/dist/codex.es.js:
     package/dist/codex.umd.js:
@@ -107,8 +107,8 @@ codex:
 
 codex-icons:
   type: tar
-  src: https://registry.npmjs.org/@wikimedia/codex-icons/-/codex-icons-0.1.0-alpha.8.tgz
-  integrity: sha512-H/DEG4korFvszcJIveLKFHoUGfGUj4oC3sSb5gsocZLfNQCRRRkGEkTEY23V9pPX68ovejza2b44MeVfvbReEQ==
+  src: https://registry.npmjs.org/@wikimedia/codex-icons/-/codex-icons-0.1.0-alpha.10.tgz
+  integrity: sha512-hWTAdOTzg99d0tRNZ/8zxPjqgkrEOiNUMSAIugn6dJr5b0R0+Vf+Uw//Nd5mA2IW4YOF58bDMemzqdajpObArQ==
   dest:
     package/dist/codex-icons.json:
     package/LICENSE:
@@ -116,8 +116,8 @@ codex-icons:
 
 codex-search:
   type: tar
-  src: https://registry.npmjs.org/@wikimedia/codex-search/-/codex-search-0.1.0-alpha.8.tgz
-  integrity: sha512-tB0EavJGmCXyLsXWRZh1UZfHi3D0pY1vXPPAgC219/v1f3WxOZSIrbbRWhLfGqbm1nkrHB4pwmgVK6rWiGxF5g==
+  src: https://registry.npmjs.org/@wikimedia/codex-search/-/codex-search-0.1.0-alpha.10.tgz
+  integrity: sha512-Wf3D7jDjIh3k51OARLjI+0AsIhO1Cm3YOT7+M86KH6e+/1ZCWflJ4W0kiM4pl39t39vDhiZfUQkOlelh1ADNZg==
   dest:
     package/dist/codex-search.es.js:
     package/dist/codex-search.umd.js:
@@ -160,12 +160,9 @@ jquery:
   type: multi-file
   files:
     # Integrities from link modals https://code.jquery.com/jquery/
-    jquery.migrate.js:
-      src: https://code.jquery.com/jquery-migrate-3.3.2.js
-      integrity: sha256-BDmtN+79VRrkfamzD16UnAoJP8zMitAz093tvZATdiE=
     jquery.js:
-      src: https://code.jquery.com/jquery-3.6.0.js
-      integrity: sha256-H+K7U5CnXl1h5ywQfKtSj8PCmoN9aaq30gDh27Xc0jk=
+      src: https://code.jquery.com/jquery-3.6.1.js
+      integrity: sha256-3zlB5s2uwoUzrXK3BT7AX3FyvojsraNFxCc2vC/7pNI=
 
 jquery.chosen:
   type: multi-file
@@ -200,18 +197,21 @@ jquery.client:
     package/LICENSE-MIT:
     package/README.md:
 
-jquery.cookie:
-  type: multi-file
-  files:
-    jquery.cookie.js:
-      src: https://raw.githubusercontent.com/carhartl/jquery-cookie/v1.3.1/jquery.cookie.js
-      integrity: sha384-Xxq63E9KDgzUJ6WPNPqVeOtRIwZyx6y9DzEwY2u6LYKSnWrjSoGtWSKmTindYBf2
-    MIT-LICENSE.txt:
-      src: https://raw.githubusercontent.com/carhartl/jquery-cookie/v1.3.1/MIT-LICENSE.txt
-      integrity: sha384-zYsGf3KJ7S0AhOICjcoh0kkn7aGZlzYUXXX5xz8dwR9KjLMM+/JPR2g/jVOGGeId
-    CHANGELOG.md:
-      src: https://raw.githubusercontent.com/carhartl/jquery-cookie/v1.3.1/CHANGELOG.md
-      integrity: sha384-SQOHhLc7PHxHDQpGE/zv9XfXKL0A7OBu8kuyVDnHVp+zSoWyRw4xUJ+LSm5ql4kS
+# # PATCHED:
+# # Changed to support SameSite and change decode logic. Seems permanent with upstream archived.
+# # Move to src instead?
+# jquery.cookie:
+#   type: multi-file
+#   files:
+#     jquery.cookie.js:
+#       src: https://raw.githubusercontent.com/carhartl/jquery-cookie/v1.3.1/jquery.cookie.js
+#       integrity: sha384-Xxq63E9KDgzUJ6WPNPqVeOtRIwZyx6y9DzEwY2u6LYKSnWrjSoGtWSKmTindYBf2
+#     MIT-LICENSE.txt:
+#       src: https://raw.githubusercontent.com/carhartl/jquery-cookie/v1.3.1/MIT-LICENSE.txt
+#       integrity: sha384-zYsGf3KJ7S0AhOICjcoh0kkn7aGZlzYUXXX5xz8dwR9KjLMM+/JPR2g/jVOGGeId
+#     CHANGELOG.md:
+#       src: https://raw.githubusercontent.com/carhartl/jquery-cookie/v1.3.1/CHANGELOG.md
+#       integrity: sha384-SQOHhLc7PHxHDQpGE/zv9XfXKL0A7OBu8kuyVDnHVp+zSoWyRw4xUJ+LSm5ql4kS
 
 jquery.form:
   type: file
@@ -230,15 +230,15 @@ jquery.hoverIntent:
 
 jquery.i18n:
   type: tar
-  src: https://codeload.github.com/wikimedia/jquery.i18n/tar.gz/v1.0.7
-  integrity: sha384-vUuZNwEm0k4d/JGRa8uoscyxTL6e1BZ0a+fTS/jtjjS+3pOcwcMo9BjzMbe6reEv
+  src: https://codeload.github.com/wikimedia/jquery.i18n/tar.gz/70b5ee20a638cb8fe36baef8d51ac2eb577ce012
+  integrity: sha384-/Upo+6ih5h5v7/GW4zzuaMNZfAHmV7cYVhORdjwT9qFTHzmIStN9mPQ+VD0niknE
   dest:
-    jquery.i18n-1.0.7/CODE_OF_CONDUCT.md:
-    jquery.i18n-1.0.7/CREDITS:
-    jquery.i18n-1.0.7/GPL-LICENSE:
-    jquery.i18n-1.0.7/MIT-LICENSE:
-    jquery.i18n-1.0.7/README.md:
-    jquery.i18n-1.0.7/src:
+    jquery.i18n-*/CODE_OF_CONDUCT.md:
+    jquery.i18n-*/CREDITS:
+    jquery.i18n-*/GPL-LICENSE:
+    jquery.i18n-*/MIT-LICENSE:
+    jquery.i18n-*/README.md:
+    jquery.i18n-*/src:
 
 jquery.throttle-debounce:
   type: file
@@ -290,8 +290,8 @@ oojs-router:
 
 ooui:
   type: tar
-  src: https://registry.npmjs.org/oojs-ui/-/oojs-ui-0.44.1.tgz
-  integrity: sha384-3dVe9nDsA6xzJt5azbZw0nTNF7NZDXePIWNnrC+umSuEe3VMkfe09chMuZXDkyU7
+  src: https://registry.npmjs.org/oojs-ui/-/oojs-ui-0.44.3.tgz
+  integrity: sha384-nP/IIJZJCEb18wfYd98CC91bW7Z10RDxHz0t0F/wBKISBmZ805GLmO9OhPHHazt0
 
   dest:
     # Main stuff
@@ -337,11 +337,11 @@ promise-polyfill:
   type: multi-file
   files:
     promise-polyfill.js:
-      # src: https://raw.githubusercontent.com/taylorhakes/promise-polyfill/8.1.3/dist/polyfill.js
-      src: https://raw.githubusercontent.com/wikimedia/promise-polyfill/9bafe45598e69e4215757dc874b99629d0dfea0d/dist/polyfill.js
+      # unreleased between 8.1.3 and 2.2.0
+      src: https://raw.githubusercontent.com/taylorhakes/promise-polyfill/65ed35b2927e97b262538054e5951d63893db05f/dist/polyfill.js
       integrity: sha384-nQUslfDX7uz5YSWudfV8dG5d8whQpNMrLcbJPLjvq+McUl2VK7v0UOVnbfs/FrMl
     LICENSE:
-      src: https://raw.githubusercontent.com/wikimedia/promise-polyfill/9bafe45598e69e4215757dc874b99629d0dfea0d/LICENSE
+      src: https://raw.githubusercontent.com/taylorhakes/promise-polyfill/65ed35b2927e97b262538054e5951d63893db05f/LICENSE
       integrity: sha384-IiroT08PAyKPUM4VsNJI7G1o3SM1y+YBBj1lwdJURXYnjtx1OzYKJTNEWs2pE684
 
 qunitjs:
@@ -363,9 +363,9 @@ sinonjs:
 
 vue:
   type: tar
-  # This is the migration build of Vue 3.2.31 which provides compatibility for Vue 2 code
-  src: https://registry.npmjs.org/@vue/compat/-/compat-3.2.31.tgz
-  integrity: sha512-hhwJk/SRwpT2OADctj+t7QZCRIgh04AcelGpe6gdj0OxA75xpHnPrG+fmG37U3Z6WDrNHZpGvu2eXBzWXM4OVA==
+  # This is the migration build of Vue 3.2.37 which provides compatibility for Vue 2 code
+  src: https://registry.npmjs.org/@vue/compat/-/compat-3.2.37.tgz
+  integrity: sha512-MIYkFAz3Fur1mtZBqrNMYTymlohCQ0ol6vtNb58cqExLSCt63xZaXyiZZYPvS6WaMXfbNBDPXMvU9tO922eFCA==
   dest:
     package/README.md:
     package/LICENSE:

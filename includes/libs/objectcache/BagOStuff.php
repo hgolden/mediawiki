@@ -62,14 +62,12 @@ use Wikimedia\ScopedCallback;
  *    from the local datacenter (e.g. by avoiding replica DBs or invoking quorom reads).
  *  - Write operation methods, e.g. set(), should be synchronous in the local datacenter, with
  *    asynchronous cross-datacenter replication. This replication can be either "best effort"
- *    or eventually consistent. When used with WRITE_SYNC, such operations will wait until all
- *    datacenters are updated or a timeout occurs. If the write succeeded, then any subsequent
- *    get() operations with READ_LATEST, regardless of datacenter, should reflect the changes.
+ *    or eventually consistent. If the write succeeded, then any subsequent `get()` operations with
+ *    READ_LATEST, regardless of datacenter, should reflect the changes.
  *  - Locking operation methods, e.g. lock(), unlock(), and getScopedLock(), should only apply
  *    to the local datacenter.
  *  - Any set of single-key write operation method calls originating from a single datacenter
- *    should observe "best effort" linearizability. Any set of single-key write operations using
- *    WRITE_SYNC, regardless of the datacenter, should observe "best effort" linearizability.
+ *    should observe "best effort" linearizability.
  *    In this context, "best effort" means that consistency holds as long as connectivity is
  *    strong, network latency is low, and there are no relevant storage server failures.
  *    Per https://en.wikipedia.org/wiki/PACELC_theorem, the store should act as a PA/EL
@@ -91,14 +89,13 @@ abstract class BagOStuff implements
 	protected $logger;
 	/** @var callable|null */
 	protected $asyncHandler;
+	/** @var int[] Map of (BagOStuff:ATTR_* constant => BagOStuff:QOS_* constant) */
+	protected $attrMap = [];
 	/**
 	 * @var array<string,array> Cache key processing callbacks and info for metrics
 	 * @phan-var array<string,array{0:string,1:callable}>
 	 */
 	protected $wrapperInfoByPrefix = [];
-
-	/** @var int[] Map of (BagOStuff:ATTR_* constant => BagOStuff:QOS_* constant) */
-	protected $attrMap = [];
 
 	/** @var string Default keyspace; used by makeKey() */
 	protected $keyspace;
@@ -115,22 +112,28 @@ abstract class BagOStuff implements
 	private $wallClockOverride;
 
 	/** Bitfield constants for get()/getMulti(); these are only advisory */
-	// if supported, avoid reading stale data due to replication
+	/** If supported, avoid reading stale data due to replication */
 	public const READ_LATEST = 1;
-	// promise that the caller handles detection of staleness
+	/** Promise that the caller handles detection of staleness */
 	public const READ_VERIFIED = 2;
 
 	/** Bitfield constants for set()/merge(); these are only advisory */
-	// if supported, block until the write is fully replicated
-	public const WRITE_SYNC = 4;
-	// only change state of the in-memory cache
+	/** Only change state of the in-memory cache */
 	public const WRITE_CACHE_ONLY = 8;
-	// allow partitioning of the value if it is large
+	/** Allow partitioning of the value if it is a large string */
 	public const WRITE_ALLOW_SEGMENTS = 16;
-	// delete all the segments if the value is partitioned
+	/** Delete all the segments if the value is partitioned */
 	public const WRITE_PRUNE_SEGMENTS = 32;
-	// if supported, do not block on completion until the next read
+	/**
+	 * If supported, do not block on write operation completion; instead, treat writes as
+	 * succesful based on whether they could be buffered. When using this flag with methods
+	 * that yield item values, the boolean "true" will be used as a placeholder. The next
+	 * blocking operation (e.g. typical read) will trigger a flush of the operation buffer.
+	 */
 	public const WRITE_BACKGROUND = 64;
+
+	/** Abort after the first merge conflict */
+	public const MAX_CONFLICTS_ONE = 1;
 
 	/** @var string Global keyspace; used by makeGlobalKey() */
 	protected const GLOBAL_KEYSPACE = 'global';
@@ -194,7 +197,7 @@ abstract class BagOStuff implements
 	}
 
 	/**
-	 * Get an item with the given key, regenerating and setting it if not found
+	 * Get an item, regenerating and setting it if not found
 	 *
 	 * The callback can take $exptime as argument by reference and modify it.
 	 * Nothing is stored nor deleted if the callback returns false.
@@ -220,7 +223,7 @@ abstract class BagOStuff implements
 	}
 
 	/**
-	 * Get an item with the given key
+	 * Get an item
 	 *
 	 * If the key includes a deterministic input hash (e.g. the key can only have
 	 * the correct value) or complete staleness checks are handled by the caller
@@ -246,15 +249,15 @@ abstract class BagOStuff implements
 	abstract public function set( $key, $value, $exptime = 0, $flags = 0 );
 
 	/**
-	 * Delete an item
+	 * Delete an item if it exists
 	 *
 	 * For large values written using WRITE_ALLOW_SEGMENTS, this only deletes the main
 	 * segment list key unless WRITE_PRUNE_SEGMENTS is in the flags. While deleting the segment
 	 * list key has the effect of functionally deleting the key, it leaves unused blobs in cache.
 	 *
 	 * @param string $key
-	 * @return bool True if the item was deleted or not found, false on failure
 	 * @param int $flags Bitfield of BagOStuff::WRITE_* constants
+	 * @return bool Success (item deleted or not found)
 	 */
 	abstract public function delete( $key, $flags = 0 );
 
@@ -265,7 +268,7 @@ abstract class BagOStuff implements
 	 * @param mixed $value
 	 * @param int $exptime
 	 * @param int $flags Bitfield of BagOStuff::WRITE_* constants (since 1.33)
-	 * @return bool Success
+	 * @return bool Success (item created)
 	 */
 	abstract public function add( $key, $value, $exptime = 0, $flags = 0 );
 
@@ -295,7 +298,7 @@ abstract class BagOStuff implements
 	);
 
 	/**
-	 * Change the expiration on a key if it exists
+	 * Change the expiration on an item
 	 *
 	 * If an expiry in the past is given then the key will immediately be expired
 	 *
@@ -308,7 +311,7 @@ abstract class BagOStuff implements
 	 * @param string $key
 	 * @param int $exptime TTL or UNIX timestamp
 	 * @param int $flags Bitfield of BagOStuff::WRITE_* constants (since 1.33)
-	 * @return bool Success Returns false on failure or if the item does not exist
+	 * @return bool Success (item found and updated)
 	 * @since 1.28
 	 */
 	abstract public function changeTTL( $key, $exptime = 0, $flags = 0 );
@@ -383,7 +386,7 @@ abstract class BagOStuff implements
 	);
 
 	/**
-	 * Get an associative array containing the item for each of the keys that have items
+	 * Get a batch of items
 	 *
 	 * @param string[] $keys List of keys
 	 * @param int $flags Bitfield; supports READ_LATEST [optional]
@@ -392,7 +395,7 @@ abstract class BagOStuff implements
 	abstract public function getMulti( array $keys, $flags = 0 );
 
 	/**
-	 * Batch insertion/replace
+	 * Set a batch of items
 	 *
 	 * This does not support WRITE_ALLOW_SEGMENTS to avoid excessive read I/O
 	 *
@@ -407,7 +410,7 @@ abstract class BagOStuff implements
 	abstract public function setMulti( array $valueByKey, $exptime = 0, $flags = 0 );
 
 	/**
-	 * Batch deletion
+	 * Delete a batch of items
 	 *
 	 * This does not support WRITE_ALLOW_SEGMENTS to avoid excessive read I/O
 	 *
@@ -415,20 +418,20 @@ abstract class BagOStuff implements
 	 *
 	 * @param string[] $keys List of keys
 	 * @param int $flags Bitfield of BagOStuff::WRITE_* constants
-	 * @return bool Success
+	 * @return bool Success (items deleted and/or not found)
 	 * @since 1.33
 	 */
 	abstract public function deleteMulti( array $keys, $flags = 0 );
 
 	/**
-	 * Change the expiration of multiple keys that exist
+	 * Change the expiration of multiple items
 	 *
 	 * @see BagOStuff::changeTTL()
 	 *
 	 * @param string[] $keys List of keys
 	 * @param int $exptime TTL or UNIX timestamp
 	 * @param int $flags Bitfield of BagOStuff::WRITE_* constants (since 1.33)
-	 * @return bool Success
+	 * @return bool Success (all items found and updated)
 	 * @since 1.34
 	 */
 	abstract public function changeTTLMulti( array $keys, $exptime, $flags = 0 );
@@ -470,7 +473,7 @@ abstract class BagOStuff implements
 	 * @param int $step Amount to increase the key value by [default: 1]
 	 * @param int|null $init Value to initialize the key to if it does not exist [default: $step]
 	 * @param int $flags Bit field of class WRITE_* constants [optional]
-	 * @return int|bool New value or false on failure or true for an asynchronous update.
+	 * @return int|bool New value (or true if asynchronous) on success; false on failure
 	 * @since 1.24
 	 */
 	abstract public function incrWithInit( $key, $exptime, $step = 1, $init = null, $flags = 0 );

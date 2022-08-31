@@ -1,7 +1,5 @@
 <?php
 /**
- * This is the MySQL database abstraction layer.
- *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
  * the Free Software Foundation; either version 2 of the License, or
@@ -18,23 +16,22 @@
  * http://www.gnu.org/copyleft/gpl.html
  *
  * @file
- * @ingroup Database
  */
 namespace Wikimedia\Rdbms;
 
 use InvalidArgumentException;
 use RuntimeException;
 use stdClass;
-use Wikimedia\AtEase\AtEase;
 use Wikimedia\Rdbms\Platform\ISQLPlatform;
 use Wikimedia\Rdbms\Platform\MySQLPlatform;
 
 /**
- * Database abstraction object for MySQL.
- * Defines methods independent on used MySQL extension.
+ * MySQL database abstraction layer.
+ *
+ * Defines methods independent of the used MySQL extension.
  *
  * TODO: This could probably be merged with DatabaseMysqli.
- * The split was created to support a transition from the old "mysql" extension
+ * The classees were split to support a transition from the old "mysql" extension
  * to mysqli, and there may be an argument for retaining it in order to support
  * some future transition to something else, but it's complexity and YAGNI.
  *
@@ -120,8 +117,7 @@ abstract class DatabaseMysqlBase extends Database {
 		$this->platform = new MySQLPlatform(
 			$this,
 			$params['queryLogger'],
-			$this->currentDomain->getSchema(),
-			$this->currentDomain->getTablePrefix()
+			$this->currentDomain
 		);
 	}
 
@@ -242,13 +238,11 @@ abstract class DatabaseMysqlBase extends Database {
 	 */
 	public function lastError() {
 		if ( $this->conn ) {
-			# Even if it's non-zero, it can still be invalid
-			AtEase::suppressWarnings();
+			// Even if it's non-zero, it can still be invalid
 			$error = $this->mysqlError( $this->conn );
 			if ( !$error ) {
 				$error = $this->mysqlError();
 			}
-			AtEase::restoreWarnings();
 		} else {
 			$error = $this->mysqlError();
 		}
@@ -327,8 +321,8 @@ abstract class DatabaseMysqlBase extends Database {
 		$options = [],
 		$join_conds = []
 	) {
-		$conds = $this->normalizeConditions( $conds, $fname );
-		$column = $this->extractSingleFieldFromList( $var );
+		$conds = $this->platform->normalizeConditions( $conds, $fname );
+		$column = $this->platform->extractSingleFieldFromList( $var );
 		if ( is_string( $column ) && !in_array( $column, [ '*', '1' ] ) ) {
 			$conds[] = "$column IS NOT NULL";
 		}
@@ -548,12 +542,16 @@ abstract class DatabaseMysqlBase extends Database {
 	}
 
 	protected function getPrimaryServerInfo() {
+		if ( !$this->topologicalPrimaryConnRef ) {
+			return false; // something is misconfigured
+		}
+
 		$cache = $this->srvCache;
 		$key = $cache->makeGlobalKey(
 			'mysql',
 			'master-info',
 			// Using one key for all cluster replica DBs is preferable
-			$this->topologyRootMaster ?? $this->getServerName()
+			$this->topologicalPrimaryConnRef->getServerName()
 		);
 		$fname = __METHOD__;
 
@@ -566,15 +564,14 @@ abstract class DatabaseMysqlBase extends Database {
 					return false; // avoid primary DB connection spike slams
 				}
 
-				$conn = $this->getLazyMasterHandle();
-				if ( !$conn ) {
-					return false; // something is misconfigured
-				}
-
 				$flags = self::QUERY_SILENCE_ERRORS | self::QUERY_IGNORE_DBO_TRX | self::QUERY_CHANGE_NONE;
 				// Connect to and query the primary DB; catch errors to avoid outages
 				try {
-					$res = $conn->query( 'SELECT @@server_id AS id', $fname, $flags );
+					$res = $this->topologicalPrimaryConnRef->query(
+						'SELECT @@server_id AS id',
+						$fname,
+						$flags
+					);
 					$row = $res ? $res->fetchObject() : false;
 					$id = $row ? (int)$row->id : 0;
 				} catch ( DBError $e ) {
@@ -990,10 +987,8 @@ abstract class DatabaseMysqlBase extends Database {
 	}
 
 	public function doLockIsFree( string $lockName, string $method ) {
-		$encName = $this->addQuotes( $this->makeLockName( $lockName ) );
-
 		$res = $this->query(
-			"SELECT IS_FREE_LOCK($encName) AS unlocked",
+			$this->platform->lockIsFreeSQLText( $lockName ),
 			$method,
 			self::QUERY_CHANGE_LOCKS
 		);
@@ -1003,13 +998,8 @@ abstract class DatabaseMysqlBase extends Database {
 	}
 
 	public function doLock( string $lockName, string $method, int $timeout ) {
-		$encName = $this->addQuotes( $this->makeLockName( $lockName ) );
-		// Unlike NOW(), SYSDATE() gets the time at invocation rather than query start.
-		// The precision argument is silently ignored for MySQL < 5.6 and MariaDB < 5.3.
-		// https://dev.mysql.com/doc/refman/5.6/en/date-and-time-functions.html#function_sysdate
-		// https://dev.mysql.com/doc/refman/5.6/en/fractional-seconds.html
 		$res = $this->query(
-			"SELECT IF(GET_LOCK($encName,$timeout),UNIX_TIMESTAMP(SYSDATE(6)),NULL) AS acquired",
+			$this->platform->lockSQLText( $lockName, $timeout ),
 			$method,
 			self::QUERY_CHANGE_LOCKS
 		);
@@ -1019,22 +1009,14 @@ abstract class DatabaseMysqlBase extends Database {
 	}
 
 	public function doUnlock( string $lockName, string $method ) {
-		$encName = $this->addQuotes( $this->makeLockName( $lockName ) );
-
 		$res = $this->query(
-			"SELECT RELEASE_LOCK($encName) AS released",
+			$this->platform->unlockSQLText( $lockName ),
 			$method,
 			self::QUERY_CHANGE_LOCKS
 		);
 		$row = $res->fetchObject();
 
 		return ( $row->released == 1 );
-	}
-
-	private function makeLockName( $lockName ) {
-		// https://dev.mysql.com/doc/refman/5.7/en/locking-functions.html#function_get-lock
-		// MySQL 5.7+ enforces a 64 char length limit.
-		return ( strlen( $lockName ) > 64 ) ? sha1( $lockName ) : $lockName;
 	}
 
 	public function namedLocksEnqueue() {
@@ -1047,7 +1029,7 @@ abstract class DatabaseMysqlBase extends Database {
 		// https://mariadb.com/kb/en/release_all_locks/
 		$releaseLockFields = [];
 		foreach ( $this->sessionNamedLocks as $name => $info ) {
-			$encName = $this->addQuotes( $this->makeLockName( $name ) );
+			$encName = $this->addQuotes( $this->platform->makeLockName( $name ) );
 			$releaseLockFields[] = "RELEASE_LOCK($encName)";
 		}
 		if ( $releaseLockFields ) {
@@ -1090,7 +1072,7 @@ abstract class DatabaseMysqlBase extends Database {
 		string $fname
 	) {
 		$encTable = $this->tableName( $table );
-		list( $sqlColumns, $sqlTuples ) = $this->makeInsertLists( $rows );
+		list( $sqlColumns, $sqlTuples ) = $this->platform->makeInsertLists( $rows );
 		$sqlColumnAssignments = $this->makeList( $set, self::LIST_SET );
 		// No need to expose __NEW.* since buildExcludedValue() uses VALUES(column)
 
@@ -1106,7 +1088,7 @@ abstract class DatabaseMysqlBase extends Database {
 
 	protected function doReplace( $table, array $identityKey, array $rows, $fname ) {
 		$encTable = $this->tableName( $table );
-		list( $sqlColumns, $sqlTuples ) = $this->makeInsertLists( $rows );
+		list( $sqlColumns, $sqlTuples ) = $this->platform->makeInsertLists( $rows );
 
 		$sql = "REPLACE INTO $encTable ($sqlColumns) VALUES $sqlTuples";
 
@@ -1279,11 +1261,6 @@ abstract class DatabaseMysqlBase extends Database {
 		return in_array( $name, $this->listViews( $prefix, __METHOD__ ) );
 	}
 
-	protected function isTransactableQuery( $sql ) {
-		return parent::isTransactableQuery( $sql ) &&
-			!preg_match( '/^SELECT\s+(GET|RELEASE|IS_FREE)_LOCK\(/', $sql );
-	}
-
 	public function selectSQLText(
 		$table,
 		$vars,
@@ -1311,17 +1288,6 @@ abstract class DatabaseMysqlBase extends Database {
 		}
 
 		return $sql;
-	}
-
-	public function buildExcludedValue( $column ) {
-		/* @see DatabaseMysqlBase::doUpsert() */
-		// Within "INSERT INTO ON DUPLICATE KEY UPDATE" statements:
-		//   - MySQL>= 8.0.20 supports and prefers "VALUES ... AS".
-		//   - MariaDB >= 10.3.3 supports and prefers VALUE().
-		//   - Both support the old VALUES() function
-		// https://dev.mysql.com/doc/refman/8.0/en/insert-on-duplicate.html
-		// https://mariadb.com/kb/en/insert-on-duplicate-key-update/
-		return "VALUES($column)";
 	}
 
 	/**

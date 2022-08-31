@@ -92,16 +92,35 @@ class SkinModule extends LessVarFileModule {
 	 *     Styles .wikitable style tables.
 	 *
 	 * "interface":
-	 *     The highest level, this stylesheet contains extra common styles for classes like
-	 *     .firstHeading, #contentSub, et cetera which are not outputted by MediaWiki but are common
+	 *     Shorthand for a set of styles that are common
 	 *     to skins like MonoBook, Vector, etc... Essentially this level is for styles that are
 	 *     common to MonoBook clones.
+	 *     This enables interface-core, interface-indicators, interface-subtitle,
+	 *      interface-user-message, interface-site-notice and interface-edit-section-links.
 	 *
 	 * "interface-category":
 	 *     Styles used for styling the categories in a horizontal bar at the bottom of the content.
 	 *
+	 * "interface-core":
+	 *     Required interface core styles. Disabling these is not recommended.
+	 *
+	 * "interface-edit-section-links":
+	 *     Default interface styling for edit section links.
+	 *
+	 * "interface-indicators":
+	 *     Default interface styling for indicators.
+	 *
 	 * "interface-message-box":
 	 *     Styles for message boxes.
+	 *
+	 * "interface-site-notice":
+	 *     Default interface styling for site notices.
+	 *
+	 * "interface-subtitle":
+	 *     Default interface styling for subtitle area.
+	 *
+	 * "interface-user-message":
+	 *     Default interface styling for html-user-message (you have new talk page messages box)
 	 *
 	 * "i18n-ordered-lists":
 	 *     Styles for ordered lists elements that support mixed language content.
@@ -149,16 +168,34 @@ class SkinModule extends LessVarFileModule {
 			'screen' => [ 'resources/src/mediawiki.skinning/content.tables.less' ],
 			'print' => [ 'resources/src/mediawiki.skinning/content.tables-print.less' ]
 		],
-		'interface' => [
-			'screen' => [ 'resources/src/mediawiki.skinning/interface.less' ],
-			'print' => [ 'resources/src/mediawiki.skinning/interface-print.less' ],
-		],
+		// Legacy shorthand for 6 features: interface-core, interface-edit-section-links,
+		// interface-indicators, interface-subtitle, interface-site-notice, interface-user-message
+		'interface' => [],
 		'interface-category' => [
 			'screen' => [ 'resources/src/mediawiki.skinning/interface.category.less' ],
 			'print' => [ 'resources/src/mediawiki.skinning/interface.category-print.less' ],
 		],
+		'interface-core' => [
+			'screen' => [ 'resources/src/mediawiki.skinning/interface.less' ],
+			'print' => [ 'resources/src/mediawiki.skinning/interface-print.less' ],
+		],
+		'interface-edit-section-links' => [
+			'screen' => [ 'resources/src/mediawiki.skinning/interface-edit-section-links.less' ],
+		],
+		'interface-indicators' => [
+			'screen' => [ 'resources/src/mediawiki.skinning/interface-indicators.less' ],
+		],
+		'interface-site-notice' => [
+			'screen' => [ 'resources/src/mediawiki.skinning/interface-site-notice.less' ],
+		],
+		'interface-subtitle' => [
+			'screen' => [ 'resources/src/mediawiki.skinning/interface-subtitle.less' ],
+		],
 		'interface-message-box' => [
 			'all' => [ 'resources/src/mediawiki.skinning/messageBoxes.less' ],
+		],
+		'interface-user-message' => [
+			'screen' => [ 'resources/src/mediawiki.skinning/interface-user-message.less' ],
 		],
 		'elements' => [
 			'screen' => [ 'resources/src/mediawiki.skinning/elements.less' ],
@@ -196,6 +233,7 @@ class SkinModule extends LessVarFileModule {
 	private const DEFAULT_FEATURES_SPECIFIED = [
 		'accessibility' => true,
 		'content-body' => true,
+		'interface-core' => true,
 		'toc' => true,
 	];
 
@@ -335,6 +373,16 @@ class SkinModule extends LessVarFileModule {
 			unset( $features[ 'content-parser-output' ] );
 		}
 
+		// The interface module is a short hand for several modules. Enable them now.
+		if ( isset( $features[ 'interface' ] ) && $features[ 'interface' ] ) {
+			unset( $features[ 'interface' ] );
+			$features[ 'interface-core' ] = true;
+			$features[ 'interface-indicators' ] = true;
+			$features[ 'interface-subtitle' ] = true;
+			$features[ 'interface-user-message' ] = true;
+			$features[ 'interface-site-notice' ] = true;
+			$features[ 'interface-edit-section-links' ] = true;
+		}
 		return $features;
 	}
 

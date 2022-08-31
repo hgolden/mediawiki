@@ -741,8 +741,10 @@ class Parser {
 			if ( $titleText !== false ) {
 				$titleText = Sanitizer::removeSomeTags( $titleText );
 			} else {
-				$titleText = $this->getTargetLanguageConverter()->convertTitle( $page );
-				$titleText = htmlspecialchars( $titleText, ENT_NOQUOTES );
+				[ $nsText, $nsSeparator, $mainText ] = $this->getTargetLanguageConverter()->convertSplitTitle( $page );
+				// In the future, those three pieces could be stored separately rather than joined into $titleText,
+				// and OutputPage would format them and join them together, to resolve T314399.
+				$titleText = self::formatPageTitle( $nsText, $nsSeparator, $mainText );
 			}
 			$this->mOutput->setTitleText( $titleText );
 		}
@@ -2842,10 +2844,7 @@ class Parser {
 		 * Some of these require message or data lookups and can be
 		 * expensive to check many times.
 		 */
-		if (
-			$this->hookRunner->onParserGetVariableValueVarCache( $this, $this->mVarCache ) &&
-			isset( $this->mVarCache[$index] )
-		) {
+		if ( isset( $this->mVarCache[$index] ) ) {
 			return $this->mVarCache[$index];
 		}
 
@@ -2862,31 +2861,15 @@ class Parser {
 
 		if ( $value === null ) {
 			// Not a defined core magic word
-			$ret = null;
-			$originalIndex = $index;
+			// Don't give this hook unrestricted access to mVarCache
+			$fakeCache = [];
 			$this->hookRunner->onParserGetVariableValueSwitch(
-				// @phan-suppress-next-line PhanTypeMismatchArgument Type mismatch on pass-by-ref args
-				$this, $this->mVarCache, $index, $ret, $frame
+				// @phan-suppress-next-line PhanTypeMismatchArgument $value is passed as null but returned as string
+				$this, $fakeCache, $index, $value, $frame
 			);
-			if ( $index !== $originalIndex ) {
-				wfDeprecatedMsg(
-					'A ParserGetVariableValueSwitch hook handler modified $index, ' .
-					'this is deprecated since MediaWiki 1.35',
-					'1.35', false, false
-				);
-			}
-			if ( !isset( $this->mVarCache[$originalIndex] ) ||
-				$this->mVarCache[$originalIndex] !== $ret
-			) {
-				wfDeprecatedMsg(
-					'A ParserGetVariableValueSwitch hook handler bypassed the cache, ' .
-					'this is deprecated since MediaWiki 1.35', '1.35', false, false
-				);
-			}
-			// FIXME: in the future, don't give this hook unrestricted
-			// access to mVarCache; we can cache it ourselves by falling
-			// through here.
-			return $ret;
+			// Cache the value returned by the hook by falling through here.
+			// Assert the the hook returned a non-null value for this MV
+			'@phan-var string $value';
 		}
 
 		$this->mVarCache[$index] = $value;
@@ -3094,6 +3077,12 @@ class Parser {
 		if ( !$found && $args->getLength() == 0 ) {
 			$id = $this->mVariables->matchStartToEnd( $part1 );
 			if ( $id !== false ) {
+				if ( strpos( $part1, ':' ) !== false ) {
+					wfDeprecatedMsg(
+						'Registering a magic variable with a name including a colon',
+						'1.39', false, false
+					);
+				}
 				$text = $this->expandMagicVariable( $id, $frame );
 				if ( $this->magicWordFactory->getCacheTTL( $id ) > -1 ) {
 					$this->mOutput->updateCacheExpiry(
@@ -3617,12 +3606,8 @@ class Parser {
 
 		// Defaults to Parser::statelessFetchTemplate()
 		$templateCb = $this->mOptions->getTemplateCallback();
-		$stuff = call_user_func( $templateCb, $title, $this );
-		if ( isset( $stuff['revision-record'] ) ) {
-			$revRecord = $stuff['revision-record'];
-		} else {
-			$revRecord = null;
-		}
+		$stuff = $templateCb( $title, $this );
+		$revRecord = $stuff['revision-record'] ?? null;
 
 		$text = $stuff['text'];
 		if ( is_string( $stuff['text'] ) ) {
@@ -3966,6 +3951,15 @@ class Parser {
 	}
 
 	/**
+	 * @param string $lowerTagName
+	 * @return bool
+	 */
+	public function tagNeedsNowikiStrippedInTagPF( string $lowerTagName ): bool {
+		$parsoidSiteConfig = MediaWikiServices::getInstance()->getParsoidSiteConfig();
+		return $parsoidSiteConfig->tagNeedsNowikiStrippedInTagPF( $lowerTagName );
+	}
+
+	/**
 	 * Return the text to be used for a given extension tag.
 	 * This is the ghost of strip().
 	 *
@@ -3976,13 +3970,17 @@ class Parser {
 	 *     inner      Contents of extension element
 	 *     noClose    Original text did not have a close tag
 	 * @param PPFrame $frame
+	 * @param bool $processNowiki Process nowiki tags by running the nowiki tag handler
+	 *     Normally, nowikis are only processed for the HTML output type. With this
+	 *     arg set to true, they are processed (and converted to a nowiki strip marker)
+	 *     for all output types.
 	 *
 	 * @throws MWException
 	 * @return string
 	 * @internal
 	 * @since 1.12
 	 */
-	public function extensionSubstitution( array $params, PPFrame $frame ) {
+	public function extensionSubstitution( array $params, PPFrame $frame, bool $processNowiki = false ) {
 		static $errorStr = '<span class="error">';
 		static $errorLen = 20;
 
@@ -4008,7 +4006,7 @@ class Parser {
 			. sprintf( '%08X', $this->mMarkerIndex++ ) . self::MARKER_SUFFIX;
 
 		$markerType = 'general';
-		if ( $this->ot['html'] ) {
+		if ( $this->ot['html'] || ( $processNowiki && $name === 'nowiki' ) ) {
 			$name = strtolower( $name );
 			$attributes = Sanitizer::decodeTagAttributes( $attrText );
 			if ( isset( $params['attributes'] ) ) {
@@ -4399,17 +4397,17 @@ class Parser {
 			$anchor = $safeHeadline;
 			$fallbackAnchor = $fallbackHeadline;
 			if ( isset( $refers[$arrayKey] ) ) {
-				for ( $i = 2; isset( $refers["${arrayKey}_$i"] ); ++$i );
+				for ( $i = 2; isset( $refers["{$arrayKey}_$i"] ); ++$i );
 				$anchor .= "_$i";
 				$linkAnchor .= "_$i";
-				$refers["${arrayKey}_$i"] = true;
+				$refers["{$arrayKey}_$i"] = true;
 			} else {
 				$refers[$arrayKey] = true;
 			}
 			if ( $fallbackHeadline !== false && isset( $refers[$fallbackArrayKey] ) ) {
-				for ( $i = 2; isset( $refers["${fallbackArrayKey}_$i"] ); ++$i );
+				for ( $i = 2; isset( $refers["{$fallbackArrayKey}_$i"] ); ++$i );
 				$fallbackAnchor .= "_$i";
-				$refers["${fallbackArrayKey}_$i"] = true;
+				$refers["{$fallbackArrayKey}_$i"] = true;
 			} else {
 				$refers[$fallbackArrayKey] = true;
 			}
@@ -4499,8 +4497,9 @@ class Parser {
 
 		$this->setOutputType( $oldType );
 
-		# Never ever show TOC if no headers
-		if ( $numVisible < 1 ) {
+		# Never ever show TOC if no headers (or suppressed)
+		$suppressToc = $this->mOptions->getSuppressTOC();
+		if ( $numVisible < 1 || $suppressToc ) {
 			$enoughToc = false;
 		}
 
@@ -4510,9 +4509,22 @@ class Parser {
 			}
 			$toc = Linker::tocList( $toc, $this->mOptions->getUserLangObj() );
 			$this->mOutput->setTOCHTML( $toc );
+			// Record the fact that the TOC should be shown. T294950
+			// (We shouldn't be looking at ::getTOCHTML() for this because
+			// eventually that will be replaced (T293513) and
+			// ::getSections() will contain sections even if there aren't
+			// $enoughToc to show.)
+			$this->mOutput->setOutputFlag( ParserOutputFlags::SHOW_TOC );
 		}
 
-		if ( $isMain ) {
+		if ( $isMain && !$suppressToc ) {
+			// We generally output the section information via the API
+			// even if there isn't "enough" of a ToC to merit showing
+			// it -- but the "suppress TOC" parser option is set when
+			// any sections that might be found aren't "really there"
+			// (ie, JavaScript content that might have spurious === or
+			// <h2>: T307691) so we will *not* set section information
+			// in that case.
 			$this->mOutput->setSections( $tocraw );
 		}
 
@@ -4843,7 +4855,11 @@ class Parser {
 		return str_replace(
 			self::TOC_PLACEHOLDER,
 			$toc,
-			$text
+			// For forwards compatibility during transition period,
+			// also replace "new" TOC_PLACEHOLDER value (to be used
+			// in the future, but might show up in the cache
+			// during a rollback to this version).
+			str_replace( '<meta property="mw:PageProp/toc" />', $toc, $text )
 		);
 	}
 
@@ -6067,7 +6083,9 @@ class Parser {
 
 		# Use specified revision timestamp, falling back to the current timestamp
 		$revObject = $this->getRevisionRecordObject();
-		$timestamp = $revObject ? $revObject->getTimestamp() : $this->mOptions->getTimestamp();
+		$timestamp = $revObject && $revObject->getTimestamp()
+			? $revObject->getTimestamp()
+			: $this->mOptions->getTimestamp();
 		$this->mOutput->setRevisionTimestampUsed( $timestamp ); // unadjusted time zone
 
 		# The cryptic '' timezone parameter tells to use the site-default
@@ -6485,6 +6503,26 @@ class Parser {
 			$html = $m[1];
 		}
 
+		return $html;
+	}
+
+	/**
+	 * Add HTML tags marking the parts of a page title, to be displayed in the first heading of the page.
+	 *
+	 * @internal
+	 * @since 1.39
+	 * @param string|HtmlArmor $nsText
+	 * @param string|HtmlArmor $nsSeparator
+	 * @param string|HtmlArmor $mainText
+	 * @return string HTML
+	 */
+	public static function formatPageTitle( $nsText, $nsSeparator, $mainText ): string {
+		$html = '';
+		if ( $nsText !== '' ) {
+			$html .= '<span class="mw-page-title-namespace">' . HtmlArmor::getHtml( $nsText ) . '</span>';
+			$html .= '<span class="mw-page-title-separator">' . HtmlArmor::getHtml( $nsSeparator ) . '</span>';
+		}
+		$html .= '<span class="mw-page-title-main">' . HtmlArmor::getHtml( $mainText ) . '</span>';
 		return $html;
 	}
 

@@ -652,10 +652,7 @@ class DatabaseTest extends PHPUnit\Framework\TestCase {
 	 * @param int $flag
 	 */
 	public function testDBOCannotSet( $flag ) {
-		$db = $this->getMockBuilder( DatabaseMysqli::class )
-			->disableOriginalConstructor()
-			->onlyMethods( [] )
-			->getMock();
+		$db = $this->createPartialMock( DatabaseMysqli::class, [] );
 
 		$this->expectException( DBUnexpectedError::class );
 		$db->setFlag( $flag );
@@ -667,10 +664,7 @@ class DatabaseTest extends PHPUnit\Framework\TestCase {
 	 * @param int $flag
 	 */
 	public function testDBOCannotClear( $flag ) {
-		$db = $this->getMockBuilder( DatabaseMysqli::class )
-			->disableOriginalConstructor()
-			->onlyMethods( [] )
-			->getMock();
+		$db = $this->createPartialMock( DatabaseMysqli::class, [] );
 
 		$this->expectException( DBUnexpectedError::class );
 		$db->clearFlag( $flag );
@@ -780,36 +774,6 @@ class DatabaseTest extends PHPUnit\Framework\TestCase {
 		$db->setLBInfo( [ 'King' => 'James' ] );
 		$this->assertNull( $db->getLBInfo( 'basketball' ) );
 		$this->assertEquals( [ 'King' => 'James' ], $db->getLBInfo() );
-	}
-
-	/**
-	 * @covers Wikimedia\Rdbms\Database::isWriteQuery
-	 * @param string $query
-	 * @param bool $res
-	 * @dataProvider provideIsWriteQuery
-	 */
-	public function testIsWriteQuery( string $query, bool $res ) {
-		$db = TestingAccessWrapper::newFromObject( $this->db );
-		$this->assertSame( $res, $db->isWriteQuery( $query, 0 ) );
-	}
-
-	/**
-	 * Provider for testIsWriteQuery
-	 * @return array
-	 */
-	public function provideIsWriteQuery(): array {
-		return [
-			[ 'SELECT foo', false ],
-			[ '  SELECT foo FROM bar', false ],
-			[ 'BEGIN', false ],
-			[ 'SHOW EXPLAIN FOR 12;', false ],
-			[ 'USE foobar', false ],
-			[ '(SELECT 1)', false ],
-			[ 'INSERT INTO foo', true ],
-			[ 'TRUNCATE bar', true ],
-			[ 'DELETE FROM baz', true ],
-			[ 'CREATE TABLE foobar', true ]
-		];
 	}
 
 	/**

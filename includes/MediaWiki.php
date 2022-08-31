@@ -532,13 +532,7 @@ class MediaWiki {
 			// Also unconditionally cache page views.
 			if ( $this->config->get( MainConfigNames::UseCdn ) ) {
 				$htmlCacheUpdater = $services->getHtmlCacheUpdater();
-				if (
-					in_array(
-						// Use PROTO_INTERNAL because that's what HtmlCacheUpdater::getUrls() uses
-						wfExpandUrl( $request->getRequestURL(), PROTO_INTERNAL ),
-						$htmlCacheUpdater->getUrls( $requestTitle )
-					)
-				) {
+				if ( $request->matchUrlForCdn( $htmlCacheUpdater->getUrls( $requestTitle ) ) ) {
 					$output->setCdnMaxage( $this->config->get( MainConfigNames::CdnMaxAge ) );
 				} elseif ( $action instanceof ViewAction ) {
 					$output->setCdnMaxage( 3600 );
@@ -640,11 +634,10 @@ class MediaWiki {
 
 	/**
 	 * @see MediaWiki::preOutputCommit()
-	 * @param callable|null $postCommitWork [default: null]
 	 * @since 1.26
 	 */
-	public function doPreOutputCommit( callable $postCommitWork = null ) {
-		self::preOutputCommit( $this->context, $postCommitWork );
+	private function doPreOutputCommit() {
+		self::preOutputCommit( $this->context );
 	}
 
 	/**
@@ -655,11 +648,11 @@ class MediaWiki {
 	 * If there is a significant amount of content to flush, it can be done in $postCommitWork
 	 *
 	 * @param IContextSource $context
-	 * @param callable|null $postCommitWork [default: null]
+	 * @param callable|null $postCommitWork Unused as of MediaWiki 1.39
 	 * @since 1.27
 	 */
 	public static function preOutputCommit(
-		IContextSource $context, callable $postCommitWork = null
+		IContextSource $context, $postCommitWork = null
 	) {
 		$config = $context->getConfig();
 		$request = $context->getRequest();
@@ -708,7 +701,7 @@ class MediaWiki {
 		$cpClientId = null;
 		$lbFactory->shutdown(
 			$lbFactory::SHUTDOWN_NORMAL,
-			$postCommitWork,
+			null,
 			$cpIndex,
 			$cpClientId
 		);
@@ -918,24 +911,15 @@ class MediaWiki {
 			// should commit, print the output, do deferred updates, jobs, and profiling.
 		}
 
-		// GUI-ify and stash the page output in MediaWiki::doPreOutputCommit()
-		$buffer = null;
-		$outputWork = static function () use ( $output, &$buffer ) {
-			if ( $buffer === null ) {
-				$buffer = $output->output( true );
-			}
-
-			return $buffer;
-		};
-
 		// Commit any changes in the current transaction round so that:
 		// a) the transaction is not rolled back after success output was already sent
 		// b) error output is not jumbled together with success output in the response
-		$this->doPreOutputCommit( $outputWork );
+		$this->doPreOutputCommit();
 		// If needed, push a deferred update to run jobs after the output is send
 		$this->schedulePostSendJobs();
+		// Ask OutputPage/Skin to render the page output
 		// If no exceptions occurred then send the output since it is safe now
-		$this->outputResponsePayload( $outputWork() );
+		$this->outputResponsePayload( $output->output( true ) );
 	}
 
 	/**
@@ -972,11 +956,7 @@ class MediaWiki {
 		return $request->getSession()->shouldForceHTTPS() ||
 			// Check the cookie manually, for paranoia
 			$request->getCookie( 'forceHTTPS', '' ) ||
-			// Avoid checking the user and groups unless it's enabled.
-			(
-				$this->context->getUser()->isRegistered()
-				&& $this->context->getUser()->requiresHTTPS()
-			);
+			$this->context->getUser()->requiresHTTPS();
 	}
 
 	/**

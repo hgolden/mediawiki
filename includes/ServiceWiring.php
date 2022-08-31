@@ -119,6 +119,7 @@ use MediaWiki\Parser\ParserObserver;
 use MediaWiki\Parser\Parsoid\Config\DataAccess as MWDataAccess;
 use MediaWiki\Parser\Parsoid\Config\PageConfigFactory as MWPageConfigFactory;
 use MediaWiki\Parser\Parsoid\Config\SiteConfig as MWSiteConfig;
+use MediaWiki\Parser\Parsoid\HTMLTransformFactory;
 use MediaWiki\Parser\Parsoid\ParsoidOutputAccess;
 use MediaWiki\Permissions\GrantsInfo;
 use MediaWiki\Permissions\GrantsLocalization;
@@ -536,8 +537,32 @@ return [
 	'DBLoadBalancerFactory' =>
 	static function ( MediaWikiServices $services ): Wikimedia\Rdbms\LBFactory {
 		$mainConfig = $services->getMainConfig();
+		$lbFactoryConfigBuilder = $services->getDBLoadBalancerFactoryConfigBuilder();
 
-		$cpStashType = $mainConfig->get( MainConfigNames::ChronologyProtectorStash );
+		$lbConf = $lbFactoryConfigBuilder->applyDefaultConfig(
+			$mainConfig->get( MainConfigNames::LBFactoryConf )
+		);
+
+		$class = $lbFactoryConfigBuilder->getLBFactoryClass( $lbConf );
+		$instance = new $class( $lbConf );
+
+		$lbFactoryConfigBuilder->setDomainAliases( $instance );
+
+		// NOTE: This accesses ProxyLookup from the MediaWikiServices singleton
+		// for non-essential non-nonimal purposes (via WebRequest::getIP).
+		// This state is fine (and meant) to be consistent for a given PHP process,
+		// even if applied to the service container for a different wiki.
+		$lbFactoryConfigBuilder->applyGlobalState(
+			$instance,
+			$mainConfig,
+			$services->getStatsdDataFactory()
+		);
+
+		return $instance;
+	},
+
+	'DBLoadBalancerFactoryConfigBuilder' => static function ( MediaWikiServices $services ): MWLBFactory {
+		$cpStashType = $services->getMainConfig()->get( MainConfigNames::ChronologyProtectorStash );
 		if ( is_string( $cpStashType ) ) {
 			$cpStash = ObjectCache::getInstance( $cpStashType );
 		} else {
@@ -559,10 +584,8 @@ return [
 			// Use process cache if no APCU or other local-server cache (e.g. on CLI)
 			$srvCache = new HashBagOStuff( [ 'maxKeys' => 100 ] );
 		}
-
-		$lbConf = MWLBFactory::applyDefaultConfig(
-			$mainConfig->get( MainConfigNames::LBFactoryConf ),
-			new ServiceOptions( MWLBFactory::APPLY_DEFAULT_CONFIG_OPTIONS, $mainConfig ),
+		return new MWLBFactory(
+			new ServiceOptions( MWLBFactory::APPLY_DEFAULT_CONFIG_OPTIONS, $services->getMainConfig() ),
 			$services->getConfiguredReadOnlyMode(),
 			$cpStash,
 			$srvCache,
@@ -570,23 +593,6 @@ return [
 			$services->getCriticalSectionProvider(),
 			$services->getStatsdDataFactory()
 		);
-
-		$class = MWLBFactory::getLBFactoryClass( $lbConf );
-		$instance = new $class( $lbConf );
-
-		MWLBFactory::setDomainAliases( $instance );
-
-		// NOTE: This accesses ProxyLookup from the MediaWikiServices singleton
-		// for non-essential non-nonimal purposes (via WebRequest::getIP).
-		// This state is fine (and meant) to be consistent for a given PHP process,
-		// even if applied to the service container for a different wiki.
-		MWLBFactory::applyGlobalState(
-			$instance,
-			$mainConfig,
-			$services->getStatsdDataFactory()
-		);
-
-		return $instance;
 	},
 
 	'DeletePageFactory' => static function ( MediaWikiServices $services ): DeletePageFactory {
@@ -719,6 +725,14 @@ return [
 			$config->get( MainConfigNames::CdnReboundPurgeDelay ),
 			$config->get( MainConfigNames::UseFileCache ),
 			$config->get( MainConfigNames::CdnMaxAge )
+		);
+	},
+
+	'HTMLTransformFactory' => static function ( MediaWikiServices $services ): HTMLTransformFactory {
+		return new HTMLTransformFactory(
+			$services->getService( '_Parsoid' ),
+			$services->getMainConfig()->get( MainConfigNames::ParsoidSettings ),
+			$services->getParsoidPageConfigFactory()
 		);
 	},
 
@@ -920,8 +934,7 @@ return [
 	'LockManagerGroupFactory' => static function ( MediaWikiServices $services ): LockManagerGroupFactory {
 		return new LockManagerGroupFactory(
 			WikiMap::getCurrentWikiDbDomain()->getId(),
-			$services->getMainConfig()->get( MainConfigNames::LockManagers ),
-			$services->getDBLoadBalancerFactory()
+			$services->getMainConfig()->get( MainConfigNames::LockManagers )
 		);
 	},
 
@@ -1342,10 +1355,7 @@ return [
 			$services->getRevisionLookup(),
 			$services->getGlobalIdGenerator(),
 			$services->getStatsdDataFactory(),
-			new Parsoid(
-				$services->getParsoidSiteConfig(),
-				$services->getParsoidDataAccess()
-			),
+			$services->getService( '_Parsoid' ),
 			$services->getParsoidSiteConfig(),
 			$services->getParsoidPageConfigFactory()
 		);
@@ -1387,6 +1397,7 @@ return [
 			$services->getLanguageFactory(),
 			$services->getLanguageConverterFactory(),
 			$services->getLanguageNameUtils(),
+			$services->getUrlUtils(),
 			// These arguments are temporary and will be removed once
 			// better solutions are found.
 			$services->getParser(), // T268776
@@ -1683,7 +1694,8 @@ return [
 			$services->getMainConfig(),
 			$services->getContentLanguage(),
 			$services->getHookContainer(),
-			ExtensionRegistry::getInstance()->getAttribute( 'SearchMappings' )
+			ExtensionRegistry::getInstance()->getAttribute( 'SearchMappings' ),
+			$services->getUserOptionsLookup()
 		);
 	},
 
@@ -2091,6 +2103,7 @@ return [
 			$services->getCommentStore(),
 			$services->getWatchedItemStore(),
 			$services->getHookContainer(),
+			$services->getUserOptionsLookup(),
 			$services->getMainConfig()->get( MainConfigNames::WatchlistExpiry ),
 			$services->getMainConfig()->get( MainConfigNames::MaxExecutionTimeForExpensiveQueries )
 		);
@@ -2183,7 +2196,7 @@ return [
 	'WRStatsFactory' => static function ( MediaWikiServices $services ): WRStatsFactory {
 		return new WRStatsFactory(
 			new BagOStuffStatsStore(
-				ObjectCache::getInstance( $services->getMainConfig()->get( 'StatsCacheType' ) )
+				ObjectCache::getInstance( $services->getMainConfig()->get( MainConfigNames::StatsCacheType ) )
 			)
 		);
 	},
@@ -2271,6 +2284,13 @@ return [
 
 	'_ParserObserver' => static function ( MediaWikiServices $services ): ParserObserver {
 		return new ParserObserver( LoggerFactory::getInstance( 'DuplicateParse' ) );
+	},
+
+	'_Parsoid' => static function ( MediaWikiServices $services ): Parsoid {
+		return new Parsoid(
+			$services->getParsoidSiteConfig(),
+			$services->getParsoidDataAccess()
+		);
 	},
 
 	'_SqlBlobStore' => static function ( MediaWikiServices $services ): SqlBlobStore {

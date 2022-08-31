@@ -252,10 +252,11 @@ class RecentChange implements Taggable {
 	 * aliases.
 	 *
 	 * @since 1.31
-	 * @return array With three keys:
-	 *   - tables: (string[]) to include in the `$table` to `IDatabase->select()`
-	 *   - fields: (string[]) to include in the `$vars` to `IDatabase->select()`
-	 *   - joins: (array) to include in the `$join_conds` to `IDatabase->select()`
+	 * @return array[] With three keys:
+	 *   - tables: (string[]) to include in the `$table` to `IDatabase->select()` or `SelectQueryBuilder::tables`
+	 *   - fields: (string[]) to include in the `$vars` to `IDatabase->select()` or `SelectQueryBuilder::fields`
+	 *   - joins: (array) to include in the `$join_conds` to `IDatabase->select()` or `SelectQueryBuilder::joinConds`
+	 * @phan-return array{tables:string[],fields:string[],joins:array}
 	 */
 	public static function getQueryInfo() {
 		$commentQuery = CommentStore::getStore()->getJoin( 'rc_comment' );
@@ -410,8 +411,6 @@ class RecentChange implements Taggable {
 	public function save( $send = self::SEND_FEED ) {
 		$mainConfig = MediaWikiServices::getInstance()->getMainConfig();
 		$putIPinRC = $mainConfig->get( MainConfigNames::PutIPinRC );
-		$useEnotif = $mainConfig->get( 'UseEnotif' );
-		$showUpdatedMarker = $mainConfig->get( MainConfigNames::ShowUpdatedMarker );
 		$dbw = wfGetDB( DB_PRIMARY );
 		if ( !is_array( $this->mExtra ) ) {
 			$this->mExtra = [];
@@ -500,7 +499,10 @@ class RecentChange implements Taggable {
 		}
 
 		# E-mail notifications
-		if ( $useEnotif || $showUpdatedMarker ) {
+		if ( $mainConfig->get( MainConfigNames::EnotifUserTalk ) ||
+			$mainConfig->get( MainConfigNames::EnotifWatchlist ) ||
+			$mainConfig->get( MainConfigNames::ShowUpdatedMarker )
+		) {
 			$userFactory = MediaWikiServices::getInstance()->getUserFactory();
 			$editor = $userFactory->newFromUserIdentity( $this->getPerformerIdentity() );
 			$page = $this->getPage();

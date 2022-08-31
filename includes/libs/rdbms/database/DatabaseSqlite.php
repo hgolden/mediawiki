@@ -1,8 +1,5 @@
 <?php
 /**
- * This is the SQLite database abstraction layer.
- * See maintenance/sqlite/README for development notes and other specific information
- *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
  * the Free Software Foundation; either version 2 of the License, or
@@ -19,7 +16,6 @@
  * http://www.gnu.org/copyleft/gpl.html
  *
  * @file
- * @ingroup Database
  */
 namespace Wikimedia\Rdbms;
 
@@ -34,6 +30,10 @@ use Wikimedia\Rdbms\Platform\ISQLPlatform;
 use Wikimedia\Rdbms\Platform\SqlitePlatform;
 
 /**
+ * This is the SQLite database abstraction layer.
+ *
+ * See docs/sqlite.txt for development notes about MediaWiki's sqlite schema.
+ *
  * @ingroup Database
  */
 class DatabaseSqlite extends Database {
@@ -85,7 +85,7 @@ class DatabaseSqlite extends Database {
 	public function __construct( array $params ) {
 		if ( isset( $params['dbFilePath'] ) ) {
 			$this->dbPath = $params['dbFilePath'];
-			if ( !strlen( $params['dbname'] ) ) {
+			if ( !isset( $params['dbname'] ) || $params['dbname'] === '' ) {
 				$params['dbname'] = self::generateDatabaseName( $this->dbPath );
 			}
 		} elseif ( isset( $params['dbDirectory'] ) ) {
@@ -100,8 +100,7 @@ class DatabaseSqlite extends Database {
 		$this->platform = new SqlitePlatform(
 			$this,
 			$params['queryLogger'],
-			$this->currentDomain->getSchema(),
-			$this->currentDomain->getTablePrefix()
+			$this->currentDomain
 		);
 	}
 
@@ -163,7 +162,13 @@ class DatabaseSqlite extends Database {
 			throw $this->newExceptionAfterConnectError( "Got mode '{$this->trxMode}' for BEGIN" );
 		}
 
-		$attributes = [ PDO::ATTR_ERRMODE => PDO::ERRMODE_SILENT ];
+		$attributes = [
+			PDO::ATTR_ERRMODE => PDO::ERRMODE_SILENT,
+			// Starting with PHP 8.1, The SQLite PDO returns proper types instead
+			// of strings or null for everything. We cast every non-null value to
+			// string to restore the old behavior.
+			PDO::ATTR_STRINGIFY_FETCHES => true
+		];
 		if ( $this->getFlag( self::DBO_PERSISTENT ) ) {
 			// Persistent connections can avoid some schema index reading overhead.
 			// On the other hand, they can cause horrible contention with DBO_TRX.
@@ -368,18 +373,6 @@ class DatabaseSqlite extends Database {
 		);
 	}
 
-	protected function isWriteQuery( $sql, $flags ) {
-		return parent::isWriteQuery( $sql, $flags ) && !preg_match( '/^(ATTACH|PRAGMA)\b/i', $sql );
-	}
-
-	protected function isTransactableQuery( $sql ) {
-		return parent::isTransactableQuery( $sql ) && !in_array(
-			$this->getQueryVerb( $sql ),
-			[ 'ATTACH', 'PRAGMA' ],
-			true
-		);
-	}
-
 	protected function doSingleStatementQuery( string $sql ): QueryStatus {
 		$conn = $this->getBindingHandle();
 
@@ -541,7 +534,7 @@ class DatabaseSqlite extends Database {
 
 	protected function doReplace( $table, array $identityKey, array $rows, $fname ) {
 		$encTable = $this->tableName( $table );
-		list( $sqlColumns, $sqlTuples ) = $this->makeInsertLists( $rows );
+		list( $sqlColumns, $sqlTuples ) = $this->platform->makeInsertLists( $rows );
 		// https://sqlite.org/lang_insert.html
 		$this->query(
 			"REPLACE INTO $encTable ($sqlColumns) VALUES $sqlTuples",
@@ -724,63 +717,6 @@ class DatabaseSqlite extends Database {
 		return $function( ...$args );
 	}
 
-	/**
-	 * @param string $s
-	 * @return string
-	 */
-	protected function replaceVars( $s ) {
-		$s = parent::replaceVars( $s );
-		if ( preg_match( '/^\s*(CREATE|ALTER) TABLE/i', $s ) ) {
-			// CREATE TABLE hacks to allow schema file sharing with MySQL
-
-			// binary/varbinary column type -> blob
-			$s = preg_replace( '/\b(var)?binary(\(\d+\))/i', 'BLOB', $s );
-			// no such thing as unsigned
-			$s = preg_replace( '/\b(un)?signed\b/i', '', $s );
-			// INT -> INTEGER
-			$s = preg_replace( '/\b(tiny|small|medium|big|)int(\s*\(\s*\d+\s*\)|\b)/i', 'INTEGER', $s );
-			// floating point types -> REAL
-			$s = preg_replace(
-				'/\b(float|double(\s+precision)?)(\s*\(\s*\d+\s*(,\s*\d+\s*)?\)|\b)/i',
-				'REAL',
-				$s
-			);
-			// varchar -> TEXT
-			$s = preg_replace( '/\b(var)?char\s*\(.*?\)/i', 'TEXT', $s );
-			// TEXT normalization
-			$s = preg_replace( '/\b(tiny|medium|long)text\b/i', 'TEXT', $s );
-			// BLOB normalization
-			$s = preg_replace( '/\b(tiny|small|medium|long|)blob\b/i', 'BLOB', $s );
-			// BOOL -> INTEGER
-			$s = preg_replace( '/\bbool(ean)?\b/i', 'INTEGER', $s );
-			// DATETIME -> TEXT
-			$s = preg_replace( '/\b(datetime|timestamp)\b/i', 'TEXT', $s );
-			// No ENUM type
-			$s = preg_replace( '/\benum\s*\([^)]*\)/i', 'TEXT', $s );
-			// binary collation type -> nothing
-			$s = preg_replace( '/\bbinary\b/i', '', $s );
-			// auto_increment -> autoincrement
-			$s = preg_replace( '/\bauto_increment\b/i', 'AUTOINCREMENT', $s );
-			// No explicit options
-			$s = preg_replace( '/\)[^);]*(;?)\s*$/', ')\1', $s );
-			// AUTOINCREMENT should immediately follow PRIMARY KEY
-			$s = preg_replace( '/primary key (.*?) autoincrement/i', 'PRIMARY KEY AUTOINCREMENT $1', $s );
-		} elseif ( preg_match( '/^\s*CREATE (\s*(?:UNIQUE|FULLTEXT)\s+)?INDEX/i', $s ) ) {
-			// No truncated indexes
-			$s = preg_replace( '/\(\d+\)/', '', $s );
-			// No FULLTEXT
-			$s = preg_replace( '/\bfulltext\b/i', '', $s );
-		} elseif ( preg_match( '/^\s*DROP INDEX/i', $s ) ) {
-			// DROP INDEX is database-wide, not table-specific, so no ON <table> clause.
-			$s = preg_replace( '/\sON\s+[^\s]*/i', '', $s );
-		} elseif ( preg_match( '/^\s*INSERT IGNORE\b/i', $s ) ) {
-			// INSERT IGNORE --> INSERT OR IGNORE
-			$s = preg_replace( '/^\s*INSERT IGNORE\b/i', 'INSERT OR IGNORE', $s );
-		}
-
-		return $s;
-	}
-
 	public function doLockIsFree( string $lockName, string $method ) {
 		// Only locks by this thread will be checked
 		return true;
@@ -924,18 +860,6 @@ class DatabaseSqlite extends Database {
 		}
 
 		return $endArray;
-	}
-
-	public function dropTable( $table, $fname = __METHOD__ ) {
-		if ( !$this->tableExists( $table, $fname ) ) {
-			return false;
-		}
-
-		// No CASCADE support; https://www.sqlite.org/lang_droptable.html
-		$sql = "DROP TABLE " . $this->tableName( $table );
-		$this->query( $sql, $fname, self::QUERY_CHANGE_SCHEMA );
-
-		return true;
 	}
 
 	protected function doTruncate( array $tables, $fname ) {

@@ -314,10 +314,12 @@ abstract class Skin extends ContextSource {
 			// Width is based on the value of @width-breakpoint-desktop
 			// This is as @width-breakpoint-desktop-wide usually tends to optimize
 			// for larger screens with max-widths and margins.
-			// The initial-scale is required to allow font-size adjustment in iOS devices (see T311795).
+			// The initial-scale SHOULD NOT be set here as defining it will impact zoom
+			// on mobile devices. To allow font-size adjustment in iOS devices (see T311795)
+			// we will define a zoom in JavaScript on certain devices (see resources/src/mediawiki.page.ready/ready.js)
 			$out->addMeta(
 				'viewport',
-				'width=1000, initial-scale=1.0'
+				'width=1000'
 			);
 		}
 
@@ -447,18 +449,6 @@ abstract class Skin extends ContextSource {
 			} else {
 				$titles[] = $namespaceInfo->getTalkPage( $title );
 			}
-		}
-
-		// Footer links (used by SkinTemplate::prepareQuickTemplate)
-		if ( $this->getConfig()->get( MainConfigNames::FooterLinkCacheExpiry ) <= 0 ) {
-			$titles = array_merge(
-				$titles,
-				array_filter( [
-					$this->footerLinkTitle( 'privacy', 'privacypage' ),
-					$this->footerLinkTitle( 'aboutsite', 'aboutpage' ),
-					$this->footerLinkTitle( 'disclaimers', 'disclaimerpage' ),
-				] )
-			);
 		}
 
 		$this->getHookRunner()->onSkinPreloadExistence( $titles, $this );
@@ -1025,14 +1015,15 @@ abstract class Skin extends ContextSource {
 	 */
 	public function footerLink( $desc, $page ) {
 		$title = $this->footerLinkTitle( $desc, $page );
-
 		if ( !$title ) {
 			return '';
 		}
 
-		$linkRenderer = MediaWikiServices::getInstance()->getLinkRenderer();
-		return $linkRenderer->makeKnownLink(
-			$title,
+		// Similar to Skin::addToSidebarPlain
+		// Optimization: Avoid LinkRenderer here as it requires extra DB info
+		// to add unneeded classes even for makeKnownLink (T313462).
+		return Html::element( 'a',
+			[ 'href' => $title->fixSpecialName()->getLinkURL() ],
 			$this->msg( $desc )->text()
 		);
 	}
@@ -1061,34 +1052,11 @@ abstract class Skin extends ContextSource {
 	 * @return string[] Map of (key => HTML) for 'privacy', 'about', 'disclaimer'
 	 */
 	public function getSiteFooterLinks() {
-		$callback = function () {
-			return [
-				'privacy' => $this->footerLink( 'privacy', 'privacypage' ),
-				'about' => $this->footerLink( 'aboutsite', 'aboutpage' ),
-				'disclaimer' => $this->footerLink( 'disclaimers', 'disclaimerpage' )
-			];
-		};
-
-		$services = MediaWikiServices::getInstance();
-		$msgCache = $services->getMessageCache();
-		$wanCache = $services->getMainWANObjectCache();
-		$config = $this->getConfig();
-
-		return ( $config->get( MainConfigNames::FooterLinkCacheExpiry ) > 0 )
-			? $wanCache->getWithSetCallback(
-				$wanCache->makeKey( 'footer-links' ),
-				$config->get( MainConfigNames::FooterLinkCacheExpiry ),
-				$callback,
-				[
-					'checkKeys' => [
-						// Unless there is both no exact $code override nor an i18n definition
-						// in the software, the only MediaWiki page to check is for $code.
-						$msgCache->getCheckKey( $this->getLanguage()->getCode() )
-					],
-					'lockTSE' => 30
-				]
-			)
-			: $callback();
+		return [
+			'privacy' => $this->footerLink( 'privacy', 'privacypage' ),
+			'about' => $this->footerLink( 'aboutsite', 'aboutpage' ),
+			'disclaimer' => $this->footerLink( 'disclaimers', 'disclaimerpage' )
+		];
 	}
 
 	/**
@@ -1460,7 +1428,7 @@ abstract class Skin extends ContextSource {
 				if ( str_contains( $rootUser, $delimiter ) ) {
 					// Username contains interwiki delimiter, link it via the
 					// #{userid} syntax. (T260222)
-					$linkArgs = [ false, [ 'user' => "#{$user->getId()}" ] ];
+					$linkArgs = [ false, [ 'user' => '#' . $user->getId() ] ];
 				} else {
 					$linkArgs = [ $rootUser ];
 				}
@@ -2617,7 +2585,33 @@ abstract class Skin extends ContextSource {
 			// the <html>, <head> and <body> tags. For SkinMustache this is always true and
 			// ignored.
 			'bodyOnly' => false,
+			'menus' => [
+				// Modern keys
+				'user-interface-preferences',
+				'user-page',
+				'user-menu',
+				'notifications',
+				// Legacy keys that are enabled by default for backwards compatibility
+				'namespaces',
+				'views',
+				'actions',
+				'variants',
+				// Opt-in menus
+				// * 'associated-pages'
+			]
 		];
+	}
+
+	/**
+	 * Does the skin support the named menu?
+	 *
+	 * @since 1.39
+	 * @param string $menu See Skin::getOptions for menu names.
+	 * @return bool
+	 */
+	public function supportsMenu( string $menu ): bool {
+		$options = $this->getOptions();
+		return in_array( $menu, $options['menus'] );
 	}
 
 	/**

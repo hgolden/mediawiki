@@ -158,16 +158,17 @@ class SiteStats {
 			function ( $oldValue, &$ttl, array &$setOpts ) use ( $group, $fname ) {
 				$dbr = self::getLB()->getConnectionRef( DB_REPLICA );
 				$setOpts += Database::getCacheSetOptions( $dbr );
-
-				return (int)$dbr->selectField(
-					'user_groups',
-					'COUNT(*)',
-					[
-						'ug_group' => $group,
-						'ug_expiry IS NULL OR ug_expiry >= ' . $dbr->addQuotes( $dbr->timestamp() )
-					],
-					$fname
-				);
+				return (int)$dbr->newSelectQueryBuilder()
+					->select( 'COUNT(*)' )
+					->from( 'user_groups' )
+					->where(
+						[
+							'ug_group' => $group,
+							'ug_expiry IS NULL OR ug_expiry >= ' . $dbr->addQuotes( $dbr->timestamp() )
+						]
+					)
+					->caller( $fname )
+					->fetchField();
 			},
 			[ 'pcTTL' => $cache::TTL_PROC_LONG ]
 		);
@@ -240,15 +241,15 @@ class SiteStats {
 	 * @return stdClass
 	 */
 	private static function doLoadFromDB( IDatabase $db ) {
-		$rows = $db->select(
-			'site_stats',
-			self::selectFields(),
-			'*',
-			__METHOD__
-		);
+		$fields = self::selectFields();
+		$rows = $db->newSelectQueryBuilder()
+			->select( $fields )
+			->from( 'site_stats' )
+			->caller( __METHOD__ )
+			->fetchResultSet();
 		$finalRow = new stdClass();
 		foreach ( $rows as $row ) {
-			foreach ( self::selectFields() as $field ) {
+			foreach ( $fields as $field ) {
 				$finalRow->$field = $finalRow->$field ?? 0;
 				if ( $row->$field ) {
 					$finalRow->$field += $row->$field;

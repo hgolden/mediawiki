@@ -305,6 +305,9 @@ class OutputPage extends ContextSource {
 	/** @var int|null To include the variable {{REVISIONID}} */
 	private $mRevisionId = null;
 
+	/** @var bool|null */
+	private $mRevisionIsCurrent = null;
+
 	/** @var string */
 	private $mRevisionTimestamp = null;
 
@@ -1135,6 +1138,8 @@ class OutputPage extends ContextSource {
 	/**
 	 * Returns page display title without namespace prefix if possible.
 	 *
+	 * This method is unreliable and best avoided. (T314399)
+	 *
 	 * @since 1.32
 	 * @return string HTML
 	 */
@@ -1143,6 +1148,20 @@ class OutputPage extends ContextSource {
 		$languageConverter = $service->getLanguageConverterFactory()
 			->getLanguageConverter( $service->getContentLanguage() );
 		$text = $this->getDisplayTitle();
+
+		// Create a regexp with matching groups as placeholders for the namespace, separator and main text
+		$pageTitleRegexp = "/^" . str_replace(
+			preg_quote( '(.+?)', '/' ),
+			'(.+?)',
+			preg_quote( Parser::formatPageTitle( '(.+?)', '(.+?)', '(.+?)' ), '/' )
+		) . "$/";
+		$matches = [];
+		if ( preg_match( $pageTitleRegexp, $text, $matches ) ) {
+			// The regexp above could be manipulated by malicious user input,
+			// sanitize the result just in case
+			return Sanitizer::removeSomeTags( $matches[3] );
+		}
+
 		$nsPrefix = $languageConverter->convertNamespace(
 			$this->getTitle()->getNamespace()
 		) . ':';
@@ -1835,13 +1854,27 @@ class OutputPage extends ContextSource {
 	}
 
 	/**
+	 * Set whether the revision displayed (as set in ::setRevisionId())
+	 * is the latest revision of the page.
+	 *
+	 * @param bool $isCurrent
+	 */
+	public function setRevisionIsCurrent( bool $isCurrent ): void {
+		$this->mRevisionIsCurrent = $isCurrent;
+	}
+
+	/**
 	 * Whether the revision displayed is the latest revision of the page
 	 *
 	 * @since 1.34
 	 * @return bool
 	 */
-	public function isRevisionCurrent() {
-		return $this->mRevisionId == 0 || $this->mRevisionId == $this->getTitle()->getLatestRevID();
+	public function isRevisionCurrent(): bool {
+		return $this->mRevisionId == 0 || (
+			$this->mRevisionIsCurrent ?? (
+				$this->mRevisionId == $this->getTitle()->getLatestRevID()
+			)
+		);
 	}
 
 	/**
@@ -3805,7 +3838,7 @@ class OutputPage extends ContextSource {
 
 		if ( $config->get( MainConfigNames::Favicon ) !== false ) {
 			$tags['favicon'] = Html::element( 'link', [
-				'rel' => 'shortcut icon',
+				'rel' => 'icon',
 				'href' => $config->get( MainConfigNames::Favicon )
 			] );
 		}

@@ -2,6 +2,7 @@
 	"@metadata": {
 		"authors": [
 			"Agusbou2015",
+			"Amire80",
 			"Andemta",
 			"Codex Sinaiticus",
 			"DannyS712",
@@ -603,8 +604,6 @@
 	"search-redirect": "(መምሪያ መንገድ $1)",
 	"search-section": "(ክፍል $1)",
 	"search-suggest": "ምናልባት $1 የፈለጉት ይሆን",
-	"search-interwiki-caption": "ተዛማጅ ስራዎች",
-	"search-interwiki-default": "$1 ውጤቶች፦",
 	"search-interwiki-more": "(ተጨማሪ)",
 	"search-relatedarticle": "የተዛመደ",
 	"searchrelated": "የተዛመደ",
@@ -1252,7 +1251,7 @@
 	"undelete-show-file-submit": "አዎን",
 	"namespace": "ዓይነት፦",
 	"invert": "(ምርጫውን ለመገልበጥ)",
-	"blanknamespace": "መጣጥፎች",
+	"blanknamespace": "(መጣጥፎች)",
 	"tool-link-contributions": "የአባል አስተዋጽኦች",
 	"contributions-title": "የ$1 አስተዋጽኦች",
 	"mycontris": "የኔ አስተዋጽኦች፤",
@@ -1637,7 +1636,6 @@
 	"version-parser-function-hooks": "የዘርዛሪ ተግባር ሜጦዎች",
 	"version-hook-name": "የሜንጦ ስም",
 	"version-hook-subscribedby": "የተጨመረበት",
-	"version-version": "($1)",
 	"version-license": "ፈቃድ",
 	"version-software": "የተሳካ ሶፍትዌር",
 	"version-software-product": "ሶፍትዌር",

@@ -6,6 +6,7 @@ use MediaWiki\HookContainer\HookContainer;
 use MediaWiki\Languages\LanguageConverterFactory;
 use MediaWiki\Languages\LanguageNameUtils;
 use MediaWiki\Linker\LinkRenderer;
+use MediaWiki\MainConfigNames;
 use MediaWiki\MediaWikiServices;
 use MediaWiki\Permissions\PermissionManager;
 use MediaWiki\Preferences\DefaultPreferencesFactory;
@@ -60,8 +61,7 @@ class DefaultPreferencesFactoryTest extends \MediaWikiIntegrationTestCase {
 
 		$services = $this->getServiceContainer();
 
-		$this->setMwGlobals( 'wgParser', $services->getParserFactory()->create() );
-		$this->setMwGlobals( 'wgDisableLangConversion', false );
+		$this->overrideConfigValue( MainConfigNames::DisableLangConversion, false );
 		$this->config = $services->getMainConfig();
 	}
 
@@ -378,7 +378,8 @@ class DefaultPreferencesFactoryTest extends \MediaWikiIntegrationTestCase {
 		$form = $prefFactory->getForm( $user, $this->context );
 		$form->show();
 		$form->trySubmit();
-		$this->assertEquals( 12, $user->getOption( 'rclimit' ) );
+		$userOptionsLookup = $this->getServiceContainer()->getUserOptionsLookup();
+		$this->assertEquals( 12, $userOptionsLookup->getOption( $user, 'rclimit' ) );
 	}
 
 	/**
@@ -460,6 +461,11 @@ class DefaultPreferencesFactoryTest extends \MediaWikiIntegrationTestCase {
 
 		$mock = $this->createMock( UserOptionsManager::class );
 		$mock->method( 'getOptions' )->willReturn( $userOptions );
+		$mock->method( 'getOption' )->willReturnCallback(
+			static function ( $user, $option ) use ( $userOptions ) {
+				return $userOptions[$option] ?? null;
+			}
+		);
 		if ( $defaultOptions ) {
 			$mock->method( 'getDefaultOptions' )->willReturn( $defaults );
 		}
@@ -484,6 +490,7 @@ class DefaultPreferencesFactoryTest extends \MediaWikiIntegrationTestCase {
 			->getMock();
 		$mockRequest->method( 'getSession' )->willReturn( $session );
 		$userMock->method( 'getRequest' )->willReturn( $mockRequest );
+		$userMock->method( 'getTitleKey' )->willReturn( '' );
 		return $userMock;
 	}
 }

@@ -20,13 +20,12 @@
 	 * @param {Object} response
 	 */
 	function showEditSummary( $formNode, response ) {
+		var $summaryPreview = $formNode.find( '.mw-summary-preview' ).empty();
 		var parse = response.parse;
 
 		if ( !parse || !parse.parsedsummary ) {
 			return;
 		}
-
-		var $summaryPreview = $formNode.find( '.mw-summary-preview' ).empty();
 
 		$summaryPreview.append(
 			mw.message( 'summary-preview' ).parse(),
@@ -242,7 +241,7 @@
 		var params = {
 			formatversion: 2,
 			action: 'parse',
-			title: mw.config.get( 'wgPageName' ),
+			title: config.title,
 			summary: config.summary,
 			prop: ''
 		};
@@ -338,6 +337,7 @@
 	 * @param {string} [config.summary=null] The edit summary. If no value is given, the summary is
 	 *   fetched from `$( '#wpSummaryWidget' )`.
 	 * @param {boolean} [config.showDiff=false] Shows a diff in the preview area instead of the content.
+	 * @param {string} [config.title=mw.config.get( 'wgPageName' )] The title of the page being previewed
 	 * @param {Array} [config.loadingSelectors=getLoadingSelectors()] An array of query selectors
 	 *   (i.e. '#catlinks') that should be grayed out while the preview is being generated.
 	 * @return {jQuery.Promise}
@@ -351,6 +351,7 @@
 			$spinnerNode: $( '.mw-spinner-preview' ),
 			summary: null,
 			showDiff: false,
+			title: mw.config.get( 'wgPageName' ),
 			loadingSelectors: getLoadingSelectors()
 		}, config );
 
@@ -387,8 +388,8 @@
 
 			var diffPar = {
 				action: 'compare',
-				fromtitle: mw.config.get( 'wgPageName' ),
-				totitle: mw.config.get( 'wgPageName' ),
+				fromtitle: config.title,
+				totitle: config.title,
 				toslots: 'main',
 				// Remove trailing whitespace for consistency with EditPage diffs.
 				// TODO trimEnd() when we can use that.

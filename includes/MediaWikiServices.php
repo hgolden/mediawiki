@@ -100,6 +100,7 @@ use MediaWiki\Page\UndeletePageFactory;
 use MediaWiki\Page\WikiPageFactory;
 use MediaWiki\Parser\ParserCacheFactory;
 use MediaWiki\Parser\Parsoid\Config\PageConfigFactory;
+use MediaWiki\Parser\Parsoid\HTMLTransformFactory;
 use MediaWiki\Parser\Parsoid\ParsoidOutputAccess;
 use MediaWiki\Permissions\GrantsInfo;
 use MediaWiki\Permissions\GrantsLocalization;
@@ -152,6 +153,7 @@ use MediaWiki\Watchlist\WatchlistManager;
 use MessageCache;
 use MimeAnalyzer;
 use MWException;
+use MWLBFactory;
 use NamespaceInfo;
 use ObjectCache;
 use OldRevisionImporter;
@@ -941,6 +943,14 @@ class MediaWikiServices extends ServiceContainer {
 	}
 
 	/**
+	 * @since 1.39
+	 * @return MWLBFactory
+	 */
+	public function getDBLoadBalancerFactoryConfigBuilder(): MWLBFactory {
+		return $this->getService( 'DBLoadBalancerFactoryConfigBuilder' );
+	}
+
+	/**
 	 * @since 1.37
 	 * @return DeletePageFactory
 	 */
@@ -1042,6 +1052,14 @@ class MediaWikiServices extends ServiceContainer {
 	 */
 	public function getHtmlCacheUpdater(): HtmlCacheUpdater {
 		return $this->getService( 'HtmlCacheUpdater' );
+	}
+
+	/**
+	 * @return HTMLTransformFactory
+	 * @since 1.39
+	 */
+	public function getHTMLTransformFactory(): HTMLTransformFactory {
+		return $this->getService( 'HTMLTransformFactory' );
 	}
 
 	/**

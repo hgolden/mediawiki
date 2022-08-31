@@ -6,6 +6,7 @@ use InvalidArgumentException;
 use LinkCacheTestTrait;
 use MediaWiki\Config\ServiceOptions;
 use MediaWiki\DAO\WikiAwareEntity;
+use MediaWiki\MainConfigNames;
 use MediaWiki\Page\PageIdentity;
 use MediaWiki\Page\PageIdentityValue;
 use MediaWiki\Page\PageRecord;
@@ -15,7 +16,6 @@ use MockTitleTrait;
 use Title;
 use TitleValue;
 use Wikimedia\Assert\PreconditionException;
-use Wikimedia\Rdbms\DBConnRef;
 use Wikimedia\Rdbms\IDatabase;
 use Wikimedia\Rdbms\LoadBalancer;
 
@@ -707,7 +707,7 @@ class PageStoreTest extends MediaWikiIntegrationTestCase {
 		$lb->expects( $this->atLeastOnce() )
 			->method( 'getConnectionRef' )
 			->with( DB_PRIMARY )
-			->willReturn( new DBConnRef( $lb, $db, DB_PRIMARY ) );
+			->willReturn( $db );
 
 		$pageStore = $this->getPageStore(
 			[
@@ -728,7 +728,10 @@ class PageStoreTest extends MediaWikiIntegrationTestCase {
 		$existingPage = $this->getExistingTestPage();
 		$title = $existingPage->getTitle();
 
-		$this->setMwGlobals( 'wgNamespacesWithSubpages', [ $title->getNamespace() => true ] );
+		$this->overrideConfigValue(
+			MainConfigNames::NamespacesWithSubpages,
+			[ $title->getNamespace() => true ]
+		);
 
 		$existingSubpageA = $this->getExistingTestPage( $title->getSubpage( 'A' ) );
 		$existingSubpageB = $this->getExistingTestPage( $title->getSubpage( 'B' ) );
@@ -752,7 +755,7 @@ class PageStoreTest extends MediaWikiIntegrationTestCase {
 	 * @covers \MediaWiki\Page\PageStore::getSubpages
 	 */
 	public function testGetSubpages_disabled() {
-		$this->setMwGlobals( 'wgNamespacesWithSubpages', [] );
+		$this->overrideConfigValue( MainConfigNames::NamespacesWithSubpages, [] );
 
 		$existingPage = $this->getExistingTestPage();
 		$title = $existingPage->getTitle();

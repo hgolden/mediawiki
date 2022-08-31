@@ -99,7 +99,7 @@ class ApiQueryImageInfo extends ApiQueryBase {
 
 		if ( isset( $params['badfilecontexttitle'] ) ) {
 			$badFileContextTitle = Title::newFromText( $params['badfilecontexttitle'] );
-			if ( !$badFileContextTitle ) {
+			if ( !$badFileContextTitle || $badFileContextTitle->isExternal() ) {
 				$p = $this->getModulePrefix();
 				$this->dieWithError( [ 'apierror-bad-badfilecontexttitle', $p ], 'invalid-title' );
 			}
@@ -361,12 +361,13 @@ class ApiQueryImageInfo extends ApiQueryBase {
 			return $thumbParams;
 		}
 
-		if ( isset( $paramList['width'] ) && isset( $thumbParams['width'] ) ) {
-			if ( (int)$paramList['width'] != (int)$thumbParams['width'] ) {
-				$this->addWarning(
-					[ 'apiwarn-urlparamwidth', $p, $paramList['width'], $thumbParams['width'] ]
-				);
-			}
+		if (
+			isset( $paramList['width'] ) && isset( $thumbParams['width'] ) &&
+			(int)$paramList['width'] != (int)$thumbParams['width']
+		) {
+			$this->addWarning(
+				[ 'apiwarn-urlparamwidth', $p, $paramList['width'], $thumbParams['width'] ]
+			);
 		}
 
 		foreach ( $paramList as $name => $value ) {

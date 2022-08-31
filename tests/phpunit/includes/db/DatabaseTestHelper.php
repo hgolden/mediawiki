@@ -57,7 +57,6 @@ class DatabaseTestHelper extends Database {
 			'agent' => '',
 			'serverName' => null,
 			'topologyRole' => null,
-			'topologicalMaster' => null,
 			'srvCache' => new HashBagOStuff(),
 			'profiler' => null,
 			'trxProfiler' => new TransactionProfiler(),
@@ -65,7 +64,7 @@ class DatabaseTestHelper extends Database {
 			'queryLogger' => new NullLogger(),
 			'replLogger' => new NullLogger(),
 			'errorLogger' => static function ( Exception $e ) {
-				wfWarn( get_class( $e ) . ": {$e->getMessage()}" );
+				wfWarn( get_class( $e ) . ': ' . $e->getMessage() );
 			},
 			'deprecationLogger' => static function ( $msg ) {
 				wfWarn( $msg );

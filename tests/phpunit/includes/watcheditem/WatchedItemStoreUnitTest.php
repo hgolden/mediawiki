@@ -16,6 +16,7 @@ use Wikimedia\Rdbms\DBConnRef;
 use Wikimedia\Rdbms\FakeResultWrapper;
 use Wikimedia\Rdbms\ILoadBalancer;
 use Wikimedia\Rdbms\LBFactory;
+use Wikimedia\Rdbms\SelectQueryBuilder;
 use Wikimedia\TestingAccessWrapper;
 
 /**
@@ -33,7 +34,10 @@ class WatchedItemStoreUnitTest extends MediaWikiIntegrationTestCase {
 	 * @return MockObject&DBConnRef
 	 */
 	private function getMockDb() {
-		return $this->createMock( DBConnRef::class );
+		$mock = $this->createMock( DBConnRef::class );
+		$mock->method( 'newSelectQueryBuilder' )
+			->willReturn( new SelectQueryBuilder( $mock ), new SelectQueryBuilder( $mock ), new SelectQueryBuilder( $mock ) );
+		return $mock;
 	}
 
 	/**
@@ -68,6 +72,8 @@ class WatchedItemStoreUnitTest extends MediaWikiIntegrationTestCase {
 	) {
 		$loadBalancer = $this->getMockLoadBalancer( $mockDb, $expectedConnectionType );
 		$mock = $this->createMock( LBFactory::class );
+		$mock->method( 'getLocalDomainID' )
+			->willReturn( 'phpunitdb' );
 		$mock->method( 'getMainLB' )
 			->willReturn( $loadBalancer );
 		$mock->method( 'getLBsForOwner' )
@@ -318,7 +324,7 @@ class WatchedItemStoreUnitTest extends MediaWikiIntegrationTestCase {
 		$mockDb->expects( $this->once() )
 			->method( 'selectField' )
 			->with(
-				[ 'watchlist', 'watchlist_expiry' ],
+				[ 'watchlist', 'watchlist_expiry' => 'watchlist_expiry' ],
 				'COUNT(*)',
 				[
 					'wl_user' => $user->getId(),
@@ -366,7 +372,7 @@ class WatchedItemStoreUnitTest extends MediaWikiIntegrationTestCase {
 		$mockDb->expects( $this->once() )
 			->method( 'selectField' )
 			->with(
-				[ 'watchlist', 'watchlist_expiry' ],
+				[ 'watchlist', 'watchlist_expiry' => 'watchlist_expiry' ],
 				'COUNT(*)',
 				[
 					'wl_namespace' => $titleValue->getNamespace(),
@@ -420,7 +426,7 @@ class WatchedItemStoreUnitTest extends MediaWikiIntegrationTestCase {
 		$mockDb->expects( $this->once() )
 			->method( 'select' )
 			->with(
-				[ 'watchlist', 'watchlist_expiry' ],
+				[ 'watchlist', 'watchlist_expiry' => 'watchlist_expiry' ],
 				[ 'wl_title', 'wl_namespace', 'watchers' => 'COUNT(*)' ],
 				[
 					'makeWhereFrom2d return value',
@@ -496,7 +502,7 @@ class WatchedItemStoreUnitTest extends MediaWikiIntegrationTestCase {
 		$mockDb->expects( $this->once() )
 			->method( 'select' )
 			->with(
-				[ 'watchlist', 'watchlist_expiry' ],
+				[ 'watchlist', 'watchlist_expiry' => 'watchlist_expiry' ],
 				[ 'wl_title', 'wl_namespace', 'watchers' => 'COUNT(*)' ],
 				[
 					'makeWhereFrom2d return value',
@@ -505,7 +511,7 @@ class WatchedItemStoreUnitTest extends MediaWikiIntegrationTestCase {
 				$this->isType( 'string' ),
 				[
 					'GROUP BY' => [ 'wl_namespace', 'wl_title' ],
-					'HAVING' => 'COUNT(*) >= 50',
+					'HAVING' => [ 'COUNT(*) >= 50' ],
 				]
 			)
 			->willReturn( $dbResult );
@@ -538,7 +544,7 @@ class WatchedItemStoreUnitTest extends MediaWikiIntegrationTestCase {
 		$mockDb->expects( $this->once() )
 			->method( 'selectField' )
 			->with(
-				[ 'watchlist', 'watchlist_expiry' ],
+				[ 'watchlist', 'watchlist_expiry' => 'watchlist_expiry' ],
 				'COUNT(*)',
 				[
 					'wl_namespace' => $titleValue->getNamespace(),
@@ -636,7 +642,7 @@ class WatchedItemStoreUnitTest extends MediaWikiIntegrationTestCase {
 		$mockDb->expects( $this->once() )
 			->method( 'select' )
 			->with(
-				[ 'watchlist', 'watchlist_expiry' ],
+				[ 'watchlist', 'watchlist_expiry' => 'watchlist_expiry' ],
 				[ 'wl_namespace', 'wl_title', 'watchers' => 'COUNT(*)' ],
 				[
 					$expectedCond,
@@ -790,7 +796,7 @@ class WatchedItemStoreUnitTest extends MediaWikiIntegrationTestCase {
 				$this->isType( 'string' ),
 				[
 					'GROUP BY' => [ 'wl_namespace', 'wl_title' ],
-					'HAVING' => 'COUNT(*) >= 50',
+					'HAVING' => [ 'COUNT(*) >= 50' ],
 				]
 			)
 			->willReturn( [] );
@@ -823,7 +829,7 @@ class WatchedItemStoreUnitTest extends MediaWikiIntegrationTestCase {
 		$mockDb->expects( $this->once() )
 			->method( 'selectRowCount' )
 			->with(
-				'watchlist',
+				[ 'watchlist' ],
 				'1',
 				[
 					"wl_notificationtimestamp IS NOT NULL",
@@ -853,7 +859,7 @@ class WatchedItemStoreUnitTest extends MediaWikiIntegrationTestCase {
 		$mockDb->expects( $this->once() )
 			->method( 'selectRowCount' )
 			->with(
-				'watchlist',
+				[ 'watchlist' ],
 				'1',
 				[
 					"wl_notificationtimestamp IS NOT NULL",
@@ -862,7 +868,7 @@ class WatchedItemStoreUnitTest extends MediaWikiIntegrationTestCase {
 				$this->isType( 'string' ),
 				[ 'LIMIT' => 50 ]
 			)
-			->willReturn( '50' );
+			->willReturn( 50 );
 
 		$mockCache = $this->getMockCache();
 		$mockCache->expects( $this->never() )->method( 'set' );
@@ -887,7 +893,7 @@ class WatchedItemStoreUnitTest extends MediaWikiIntegrationTestCase {
 		$mockDb->expects( $this->once() )
 			->method( 'selectRowCount' )
 			->with(
-				'watchlist',
+				[ 'watchlist' ],
 				'1',
 				[
 					"wl_notificationtimestamp IS NOT NULL",
@@ -896,7 +902,7 @@ class WatchedItemStoreUnitTest extends MediaWikiIntegrationTestCase {
 				$this->isType( 'string' ),
 				[ 'LIMIT' => 50 ]
 			)
-			->willReturn( '9' );
+			->willReturn( 9 );
 
 		$mockCache = $this->getMockCache();
 		$mockCache->expects( $this->never() )->method( 'set' );
@@ -919,7 +925,7 @@ class WatchedItemStoreUnitTest extends MediaWikiIntegrationTestCase {
 		$mockDb->expects( $this->once() )
 			->method( 'select' )
 			->with(
-				[ 'watchlist', 'watchlist_expiry' ],
+				[ 'watchlist', 'watchlist_expiry' => 'watchlist_expiry' ],
 				[ 'wl_user', 'wl_notificationtimestamp', 'we_expiry' ],
 				[
 					'wl_namespace' => 0,
@@ -955,7 +961,7 @@ class WatchedItemStoreUnitTest extends MediaWikiIntegrationTestCase {
 		];
 
 		$mockDb = $this->getMockDb();
-		$mockDb->expects( $this->at( 0 ) )
+		$mockDb->expects( $this->at( 1 ) )
 			->method( 'select' )
 			->with(
 				[ 'watchlist' ],
@@ -966,7 +972,7 @@ class WatchedItemStoreUnitTest extends MediaWikiIntegrationTestCase {
 				]
 			)
 			->willReturn( new FakeResultWrapper( $fakeRows ) );
-		$mockDb->expects( $this->at( 1 ) )
+		$mockDb->expects( $this->at( 2 ) )
 			->method( 'replace' )
 			->with(
 				'watchlist',
@@ -1009,10 +1015,10 @@ class WatchedItemStoreUnitTest extends MediaWikiIntegrationTestCase {
 	 */
 	public function testDuplicateAllAssociatedEntries_nothingToDuplicate( $testPageFactory ) {
 		$mockDb = $this->getMockDb();
-		$mockDb->expects( $this->at( 0 ) )
+		$mockDb->expects( $this->at( 1 ) )
 			->method( 'select' )
 			->with(
-				[ 'watchlist', 'watchlist_expiry' ],
+				[ 'watchlist', 'watchlist_expiry' => 'watchlist_expiry' ],
 				[ 'wl_user', 'wl_notificationtimestamp', 'we_expiry' ],
 				[
 					'wl_namespace' => 0,
@@ -1020,10 +1026,10 @@ class WatchedItemStoreUnitTest extends MediaWikiIntegrationTestCase {
 				]
 			)
 			->willReturn( new FakeResultWrapper( [] ) );
-		$mockDb->expects( $this->at( 1 ) )
+		$mockDb->expects( $this->at( 3 ) )
 			->method( 'select' )
 			->with(
-				[ 'watchlist', 'watchlist_expiry' ],
+				[ 'watchlist', 'watchlist_expiry' => 'watchlist_expiry' ],
 				[ 'wl_user', 'wl_notificationtimestamp', 'we_expiry' ],
 				[
 					'wl_namespace' => 1,
@@ -1069,7 +1075,7 @@ class WatchedItemStoreUnitTest extends MediaWikiIntegrationTestCase {
 		];
 
 		$mockDb = $this->getMockDb();
-		$mockDb->expects( $this->at( 0 ) )
+		$mockDb->expects( $this->at( 1 ) )
 			->method( 'select' )
 			->with(
 				[ 'watchlist' ],
@@ -1080,7 +1086,7 @@ class WatchedItemStoreUnitTest extends MediaWikiIntegrationTestCase {
 				]
 			)
 			->willReturn( new FakeResultWrapper( $fakeRows ) );
-		$mockDb->expects( $this->at( 1 ) )
+		$mockDb->expects( $this->at( 2 ) )
 			->method( 'replace' )
 			->with(
 				'watchlist',
@@ -1095,7 +1101,10 @@ class WatchedItemStoreUnitTest extends MediaWikiIntegrationTestCase {
 				],
 				$this->isType( 'string' )
 			);
-		$mockDb->expects( $this->at( 2 ) )
+		$mockDb->expects( $this->at( 3 ) )
+			->method( 'newSelectQueryBuilder' )
+			->willReturn( new SelectQueryBuilder( $mockDb ) );
+		$mockDb->expects( $this->at( 4 ) )
 			->method( 'select' )
 			->with(
 				[ 'watchlist' ],
@@ -1106,7 +1115,7 @@ class WatchedItemStoreUnitTest extends MediaWikiIntegrationTestCase {
 				]
 			)
 			->willReturn( new FakeResultWrapper( $fakeRows ) );
-		$mockDb->expects( $this->at( 3 ) )
+		$mockDb->expects( $this->at( 5 ) )
 			->method( 'replace' )
 			->with(
 				'watchlist',
@@ -1311,7 +1320,7 @@ class WatchedItemStoreUnitTest extends MediaWikiIntegrationTestCase {
 		$mockDb->expects( $this->once() )
 			->method( 'select' )
 			->with(
-				[ 'watchlist', 'watchlist_expiry' ],
+				[ 'watchlist', 'watchlist_expiry' => 'watchlist_expiry' ],
 				[ 'wl_namespace', 'wl_title', 'wl_notificationtimestamp', 'we_expiry' ],
 				[
 					'wl_user' => 1,
@@ -1509,7 +1518,7 @@ class WatchedItemStoreUnitTest extends MediaWikiIntegrationTestCase {
 		$mockDb->expects( $this->once() )
 			->method( 'select' )
 			->with(
-				[ 'watchlist', 'watchlist_expiry' ],
+				[ 'watchlist', 'watchlist_expiry' => 'watchlist_expiry' ],
 				[ 'wl_namespace', 'wl_title', 'wl_notificationtimestamp', 'we_expiry' ],
 				[
 					'wl_user' => 1,
@@ -1601,7 +1610,7 @@ class WatchedItemStoreUnitTest extends MediaWikiIntegrationTestCase {
 		$mockDb->expects( $this->once() )
 			->method( 'select' )
 			->with(
-				[ 'watchlist', 'watchlist_expiry' ],
+				[ 'watchlist', 'watchlist_expiry' => 'watchlist_expiry' ],
 				[ 'wl_namespace', 'wl_title', 'wl_notificationtimestamp', 'we_expiry' ],
 				[
 					'wl_user' => 1,
@@ -1660,7 +1669,7 @@ class WatchedItemStoreUnitTest extends MediaWikiIntegrationTestCase {
 		$mockDb->expects( $this->once() )
 			->method( 'select' )
 			->with(
-				[ 'watchlist', 'watchlist_expiry' ],
+				[ 'watchlist', 'watchlist_expiry' => 'watchlist_expiry' ],
 				[ 'wl_namespace', 'wl_title', 'wl_notificationtimestamp', 'we_expiry' ],
 				[ 'wl_user' => 1, 'we_expiry IS NULL OR we_expiry > 20200101000000' ]
 			)
@@ -1730,7 +1739,7 @@ class WatchedItemStoreUnitTest extends MediaWikiIntegrationTestCase {
 		$mockDb->expects( $this->once() )
 			->method( 'select' )
 			->with(
-				[ 'watchlist', 'watchlist_expiry' ],
+				[ 'watchlist', 'watchlist_expiry' => 'watchlist_expiry' ],
 				[ 'wl_namespace', 'wl_title', 'wl_notificationtimestamp', 'we_expiry' ],
 				[ 'wl_user' => 1, 'we_expiry IS NULL OR we_expiry > 20200101000000' ],
 				$this->isType( 'string' ),
@@ -1756,7 +1765,7 @@ class WatchedItemStoreUnitTest extends MediaWikiIntegrationTestCase {
 		$mockDb->expects( $this->once() )
 			->method( 'select' )
 			->with(
-				[ 'watchlist', 'watchlist_expiry' ],
+				[ 'watchlist', 'watchlist_expiry' => 'watchlist_expiry' ],
 				[
 					'wl_namespace',
 					'wl_title',
@@ -1844,7 +1853,7 @@ class WatchedItemStoreUnitTest extends MediaWikiIntegrationTestCase {
 		$mockDb->expects( $this->once() )
 			->method( 'select' )
 			->with(
-				[ 'watchlist', 'watchlist_expiry' ],
+				[ 'watchlist', 'watchlist_expiry' => 'watchlist_expiry' ],
 				[ 'wl_namespace', 'wl_title', 'wl_notificationtimestamp', 'we_expiry' ],
 				[
 					'wl_user' => 1,
@@ -1897,7 +1906,7 @@ class WatchedItemStoreUnitTest extends MediaWikiIntegrationTestCase {
 		$mockDb->expects( $this->once() )
 			->method( 'select' )
 			->with(
-				[ 'watchlist', 'watchlist_expiry' ],
+				[ 'watchlist', 'watchlist_expiry' => 'watchlist_expiry' ],
 				[ 'wl_namespace', 'wl_title', 'wl_notificationtimestamp', 'we_expiry' ],
 				[
 					'wl_user' => 1,
@@ -1982,7 +1991,7 @@ class WatchedItemStoreUnitTest extends MediaWikiIntegrationTestCase {
 		$mockDb->expects( $this->once() )
 			->method( 'select' )
 			->with(
-				'watchlist',
+				[ 'watchlist' ],
 				[ 'wl_namespace', 'wl_title', 'wl_notificationtimestamp' ],
 				[
 					'makeWhereFrom2d return value',
@@ -2036,7 +2045,7 @@ class WatchedItemStoreUnitTest extends MediaWikiIntegrationTestCase {
 		$mockDb->expects( $this->once() )
 			->method( 'select' )
 			->with(
-				'watchlist',
+				[ 'watchlist' ],
 				[ 'wl_namespace', 'wl_title', 'wl_notificationtimestamp' ],
 				[
 					'makeWhereFrom2d return value',
@@ -2090,7 +2099,7 @@ class WatchedItemStoreUnitTest extends MediaWikiIntegrationTestCase {
 		$mockDb->expects( $this->once() )
 			->method( 'select' )
 			->with(
-				'watchlist',
+				[ 'watchlist' ],
 				[ 'wl_namespace', 'wl_title', 'wl_notificationtimestamp' ],
 				[
 					'makeWhereFrom2d return value',
@@ -2227,7 +2236,7 @@ class WatchedItemStoreUnitTest extends MediaWikiIntegrationTestCase {
 		$mockDb->expects( $this->once() )
 			->method( 'select' )
 			->with(
-				[ 'watchlist', 'watchlist_expiry' ],
+				[ 'watchlist', 'watchlist_expiry' => 'watchlist_expiry' ],
 				[ 'wl_namespace', 'wl_title', 'wl_notificationtimestamp', 'we_expiry' ],
 				[
 					'wl_user' => 1,
@@ -2277,7 +2286,7 @@ class WatchedItemStoreUnitTest extends MediaWikiIntegrationTestCase {
 		$mockDb->expects( $this->once() )
 			->method( 'select' )
 			->with(
-				[ 'watchlist', 'watchlist_expiry' ],
+				[ 'watchlist', 'watchlist_expiry' => 'watchlist_expiry' ],
 				[ 'wl_namespace', 'wl_title', 'wl_notificationtimestamp', 'we_expiry' ],
 				[
 					'wl_user' => 1,
@@ -2506,7 +2515,7 @@ class WatchedItemStoreUnitTest extends MediaWikiIntegrationTestCase {
 		$mockDb->expects( $this->once() )
 			->method( 'select' )
 			->with(
-				[ 'watchlist', 'watchlist_expiry' ],
+				[ 'watchlist', 'watchlist_expiry' => 'watchlist_expiry' ],
 				[ 'wl_namespace', 'wl_title', 'wl_notificationtimestamp', 'we_expiry' ],
 				[
 					'wl_user' => 1,
@@ -2605,7 +2614,7 @@ class WatchedItemStoreUnitTest extends MediaWikiIntegrationTestCase {
 		$mockDb->expects( $this->once() )
 			->method( 'select' )
 			->with(
-				[ 'watchlist', 'watchlist_expiry' ],
+				[ 'watchlist', 'watchlist_expiry' => 'watchlist_expiry' ],
 				[ 'wl_namespace', 'wl_title', 'wl_notificationtimestamp', 'we_expiry' ],
 				[
 					'wl_user' => 1,
@@ -2699,7 +2708,7 @@ class WatchedItemStoreUnitTest extends MediaWikiIntegrationTestCase {
 		$mockDb->expects( $this->once() )
 			->method( 'select' )
 			->with(
-				[ 'watchlist', 'watchlist_expiry' ],
+				[ 'watchlist', 'watchlist_expiry' => 'watchlist_expiry' ],
 				[ 'wl_namespace', 'wl_title', 'wl_notificationtimestamp', 'we_expiry' ],
 				[
 					'wl_user' => 1,
@@ -2801,7 +2810,7 @@ class WatchedItemStoreUnitTest extends MediaWikiIntegrationTestCase {
 		$mockDb->expects( $this->once() )
 			->method( 'select' )
 			->with(
-				[ 'watchlist', 'watchlist_expiry' ],
+				[ 'watchlist', 'watchlist_expiry' => 'watchlist_expiry' ],
 				[ 'wl_namespace', 'wl_title', 'wl_notificationtimestamp', 'we_expiry' ],
 				[
 					'wl_user' => 1,
@@ -2973,7 +2982,7 @@ class WatchedItemStoreUnitTest extends MediaWikiIntegrationTestCase {
 		$mockDb->expects( $this->once() )
 			->method( 'selectFieldValues' )
 			->with(
-				[ 'watchlist', 'watchlist_expiry' ],
+				[ 'watchlist', 'watchlist_expiry' => 'watchlist_expiry' ],
 				'wl_user',
 				[
 					'wl_user != 1',
@@ -3035,7 +3044,7 @@ class WatchedItemStoreUnitTest extends MediaWikiIntegrationTestCase {
 		$mockDb->expects( $this->once() )
 			->method( 'selectFieldValues' )
 			->with(
-				[ 'watchlist', 'watchlist_expiry' ],
+				[ 'watchlist', 'watchlist_expiry' => 'watchlist_expiry' ],
 				'wl_user',
 				[
 					'wl_user != 1',
@@ -3138,7 +3147,7 @@ class WatchedItemStoreUnitTest extends MediaWikiIntegrationTestCase {
 			->withConsecutive(
 				// Select expired items.
 				[
-					'watchlist_expiry',
+					[ 'watchlist_expiry' ],
 					'we_item',
 					[ 'we_expiry <= 20200101000000' ],
 					'WatchedItemStore::removeExpired',
@@ -3146,7 +3155,7 @@ class WatchedItemStoreUnitTest extends MediaWikiIntegrationTestCase {
 				],
 				// Select orphaned items.
 				[
-					[ 'watchlist_expiry', 'watchlist' ],
+					[ 'watchlist_expiry', 'watchlist' => 'watchlist' ],
 					'we_item',
 					[ 'wl_id' => null, 'we_expiry' => null ],
 					'WatchedItemStore::removeExpired',
@@ -3252,7 +3261,7 @@ class WatchedItemStoreUnitTest extends MediaWikiIntegrationTestCase {
 		$stash->set(
 			$stash->makeGlobalKey(
 				'watchlist-recent-updates',
-				'',
+				'phpunitdb',
 				$user->getId()
 			),
 			$cacheValue
@@ -3300,6 +3309,6 @@ class WatchedItemStoreUnitTest extends MediaWikiIntegrationTestCase {
 			$title,
 			'force',
 			$oldid );
-		$this->assertIsArray( $stash->get( 'global:watchlist-recent-updates::1' ) );
+		$this->assertIsArray( $stash->get( 'global:watchlist-recent-updates:phpunitdb:1' ) );
 	}
 }

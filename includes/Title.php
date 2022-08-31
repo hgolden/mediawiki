@@ -1155,7 +1155,7 @@ class Title implements LinkTarget, PageIdentity, IDBAccessObject {
 	/**
 	 * Get the namespace text
 	 *
-	 * @return string|false Namespace text
+	 * @return string|false Namespace name with underscores (not spaces), e.g. 'User_talk'
 	 */
 	public function getNsText() {
 		if ( $this->isExternal() ) {
@@ -1185,7 +1185,7 @@ class Title implements LinkTarget, PageIdentity, IDBAccessObject {
 	/**
 	 * Get the namespace text of the subject (rather than talk) page
 	 *
-	 * @return string Namespace text
+	 * @return string Namespace name with underscores (not spaces)
 	 */
 	public function getSubjectNsText() {
 		$services = MediaWikiServices::getInstance();
@@ -1196,7 +1196,7 @@ class Title implements LinkTarget, PageIdentity, IDBAccessObject {
 	/**
 	 * Get the namespace text of the talk page
 	 *
-	 * @return string Namespace text
+	 * @return string Namespace name with underscores (not spaces)
 	 */
 	public function getTalkNsText() {
 		$services = MediaWikiServices::getInstance();
@@ -1428,6 +1428,7 @@ class Title implements LinkTarget, PageIdentity, IDBAccessObject {
 	 */
 	public function isConversionTable() {
 		// @todo ConversionTable should become a separate content model.
+		// @todo And the prefix should be localized, too!
 
 		return $this->mNamespace === NS_MEDIAWIKI &&
 			strpos( $this->getText(), 'Conversiontable/' ) === 0;
@@ -3021,16 +3022,24 @@ class Title implements LinkTarget, PageIdentity, IDBAccessObject {
 			$db = wfGetDB( DB_REPLICA );
 		}
 
-		$res = $db->select(
-			[ 'page', $table ],
-			LinkCache::getSelectFields(),
-			[
-				"{$prefix}_from=page_id",
+		$linksMigration = MediaWikiServices::getInstance()->getLinksMigration();
+		if ( isset( $linksMigration::$mapping[$table] ) ) {
+			$titleConds = $linksMigration->getLinksConditions( $table, $this );
+		} else {
+			$titleConds = [
 				"{$prefix}_namespace" => $this->mNamespace,
-				"{$prefix}_title" => $this->mDbkeyform ],
-			__METHOD__,
-			$options
-		);
+				"{$prefix}_title" => $this->mDbkeyform
+			];
+		}
+
+		$res = $db->newSelectQueryBuilder()
+			->select( LinkCache::getSelectFields() )
+			->from( $table )
+			->join( 'page', null, "{$prefix}_from=page_id" )
+			->where( $titleConds )
+			->options( $options )
+			->caller( __METHOD__ )
+			->fetchResultSet();
 
 		$retVal = [];
 		if ( $res->numRows() ) {

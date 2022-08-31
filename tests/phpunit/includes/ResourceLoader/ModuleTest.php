@@ -3,6 +3,7 @@
 namespace MediaWiki\Tests\ResourceLoader;
 
 use LogicException;
+use MediaWiki\MainConfigNames;
 use MediaWiki\ResourceLoader\FileModule;
 use MediaWiki\ResourceLoader\Module;
 use MediaWiki\ResourceLoader\ResourceLoader;
@@ -11,11 +12,11 @@ use ResourceLoaderFileModuleTestingSubclass;
 use ResourceLoaderTestCase;
 use ResourceLoaderTestModule;
 
+/**
+ * @covers \MediaWiki\ResourceLoader\Module
+ */
 class ModuleTest extends ResourceLoaderTestCase {
 
-	/**
-	 * @covers \MediaWiki\ResourceLoader\Module::getVersionHash
-	 */
 	public function testGetVersionHash() {
 		$context = $this->getResourceLoaderContext( [ 'debug' => 'false' ] );
 
@@ -26,10 +27,12 @@ class ModuleTest extends ResourceLoaderTestCase {
 		];
 
 		$module = new FileModule( $baseParams );
+		$module->setName( "" );
 		$version = json_encode( $module->getVersionHash( $context ) );
 
 		// Exactly the same
 		$module = new FileModule( $baseParams );
+		$module->setName( "" );
 		$this->assertEquals(
 			$version,
 			json_encode( $module->getVersionHash( $context ) ),
@@ -40,6 +43,7 @@ class ModuleTest extends ResourceLoaderTestCase {
 		$module = new FileModule( [
 			'dependencies' => [ 'mediawiki', 'jquery' ],
 		] + $baseParams );
+		$module->setName( "" );
 		$this->assertEquals(
 			$version,
 			json_encode( $module->getVersionHash( $context ) ),
@@ -50,6 +54,7 @@ class ModuleTest extends ResourceLoaderTestCase {
 		$module = new FileModule( [
 			'messages' => [ 'world', 'hello' ],
 		] + $baseParams );
+		$module->setName( "" );
 		$this->assertEquals(
 			$version,
 			json_encode( $module->getVersionHash( $context ) ),
@@ -60,6 +65,7 @@ class ModuleTest extends ResourceLoaderTestCase {
 		$module = new FileModule( [
 			'scripts' => [ 'bar.js', 'foo.js' ],
 		] + $baseParams );
+		$module->setName( "" );
 		$this->assertNotEquals(
 			$version,
 			json_encode( $module->getVersionHash( $context ) ),
@@ -68,6 +74,7 @@ class ModuleTest extends ResourceLoaderTestCase {
 
 		// Subclass
 		$module = new ResourceLoaderFileModuleTestingSubclass( $baseParams );
+		$module->setName( "" );
 		$this->assertNotEquals(
 			$version,
 			json_encode( $module->getVersionHash( $context ) ),
@@ -75,35 +82,29 @@ class ModuleTest extends ResourceLoaderTestCase {
 		);
 	}
 
-	/**
-	 * @covers \MediaWiki\ResourceLoader\Module::getVersionHash
-	 */
 	public function testGetVersionHash_debug() {
 		$module = new ResourceLoaderTestModule( [ 'script' => 'foo();' ] );
+		$module->setName( "" );
 		$context = $this->getResourceLoaderContext( [ 'debug' => 'true' ] );
 		$this->assertSame( '', $module->getVersionHash( $context ) );
 	}
 
-	/**
-	 * @covers \MediaWiki\ResourceLoader\Module::getVersionHash
-	 */
 	public function testGetVersionHash_length() {
 		$context = $this->getResourceLoaderContext( [ 'debug' => 'false' ] );
 		$module = new ResourceLoaderTestModule( [
 			'script' => 'foo();'
 		] );
+		$module->setName( "" );
 		$version = $module->getVersionHash( $context );
 		$this->assertSame( ResourceLoader::HASH_LENGTH, strlen( $version ), 'Hash length' );
 	}
 
-	/**
-	 * @covers \MediaWiki\ResourceLoader\Module::getVersionHash
-	 */
 	public function testGetVersionHash_parentDefinition() {
 		$context = $this->getResourceLoaderContext( [ 'debug' => 'false' ] );
 		$module = $this->getMockBuilder( Module::class )
 			->onlyMethods( [ 'getDefinitionSummary' ] )->getMock();
 		$module->method( 'getDefinitionSummary' )->willReturn( [ 'a' => 'summary' ] );
+		$module->setName( "" );
 
 		$this->expectException( LogicException::class );
 		$this->expectExceptionMessage( 'must call parent' );
@@ -111,9 +112,8 @@ class ModuleTest extends ResourceLoaderTestCase {
 	}
 
 	/**
-	 * @covers \MediaWiki\ResourceLoader\Module::getScriptURLsForDebug
+	 * @covers \MediaWiki\ResourceLoader\Module
 	 * @covers \MediaWiki\ResourceLoader\ResourceLoader
-	 * @covers \MediaWiki\ResourceLoader\Module::getScriptURLsForDebug
 	 */
 	public function testGetURLsForDebug() {
 		$module = new ResourceLoaderTestModule( [
@@ -122,6 +122,7 @@ class ModuleTest extends ResourceLoaderTestCase {
 		] );
 		$context = $this->getResourceLoaderContext( [ 'debug' => 'true' ] );
 		$module->setConfig( $context->getResourceLoader()->getConfig() );
+		$module->setName( "" );
 
 		$this->assertEquals(
 			[
@@ -155,11 +156,8 @@ class ModuleTest extends ResourceLoaderTestCase {
 		);
 	}
 
-	/**
-	 * @covers \MediaWiki\ResourceLoader\Module::validateScriptFile
-	 */
 	public function testValidateScriptFile() {
-		$this->setMwGlobals( 'wgResourceLoaderValidateJS', true );
+		$this->overrideConfigValue( MainConfigNames::ResourceLoaderValidateJS, true );
 
 		$context = $this->getResourceLoaderContext();
 
@@ -222,13 +220,13 @@ class ModuleTest extends ResourceLoaderTestCase {
 
 	/**
 	 * @dataProvider provideBuildContentScripts
-	 * @covers \MediaWiki\ResourceLoader\Module::buildContent
 	 */
 	public function testBuildContentScripts( $raw, $build, $message = '' ) {
 		$context = $this->getResourceLoaderContext();
 		$module = new ResourceLoaderTestModule( [
 			'script' => $raw
 		] );
+		$module->setName( "" );
 		$this->assertEquals( $raw, $module->getScript( $context ), 'Raw script' );
 		$this->assertEquals(
 			$build,
@@ -237,10 +235,6 @@ class ModuleTest extends ResourceLoaderTestCase {
 		);
 	}
 
-	/**
-	 * @covers \MediaWiki\ResourceLoader\Module::getRelativePaths
-	 * @covers \MediaWiki\ResourceLoader\Module::expandRelativePaths
-	 */
 	public function testPlaceholderize() {
 		$getRelativePaths = new ReflectionMethod( Module::class, 'getRelativePaths' );
 		$getRelativePaths->setAccessible( true );
@@ -274,14 +268,11 @@ class ModuleTest extends ResourceLoaderTestCase {
 		);
 	}
 
-	/**
-	 * @covers \MediaWiki\ResourceLoader\Module::getHeaders
-	 * @covers \MediaWiki\ResourceLoader\Module::getPreloadLinks
-	 */
 	public function testGetHeaders() {
 		$context = $this->getResourceLoaderContext();
 
 		$module = new ResourceLoaderTestModule();
+		$module->setName( "" );
 		$this->assertSame( [], $module->getHeaders( $context ), 'Default' );
 
 		$module = $this->getMockBuilder( ResourceLoaderTestModule::class )
@@ -303,6 +294,7 @@ class ModuleTest extends ResourceLoaderTestCase {
 			'https://example.org/script.js' => [ 'as' => 'script' ],
 			'/example.png' => [ 'as' => 'image' ],
 		] );
+		$module->setName( "" );
 		$this->assertSame(
 			[
 				'Link: <https://example.org/script.js>;rel=preload;as=script,' .

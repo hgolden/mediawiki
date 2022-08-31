@@ -1,4 +1,29 @@
 # OOUI Release History
+## v0.44.3 / 2022-08-16
+### Features
+* DropdownWidget: Add screen reader support while collapsed (Bartosz Dziewoński)
+* SelectWidget: Introduce findFirstSelectedItem() for performance (Thiemo Kreuz)
+
+### Styles
+* Follow-up Ic69c931: Use z-index of 0 for creating stacking context in progress bar (Ed Sanders)
+* icons: Update 'info' icon to newest design (Volker E.)
+* icons: Remove unnecessary code from recently-added icons (Thiemo Kreuz)
+
+
+## v0.44.2 / 2022-07-27
+### Features
+* SelectWidget: Add Home/End/PageUp/PageDown support, tweak arrow keys wrapping (Bartosz Dziewoński)
+
+### Styles
+* FieldLayout: Adjust help popup with `align: left/right` and long label (Bartosz Dziewoński)
+* FieldLayout: Fix and document the behavior when no label is given (Bartosz Dziewoński)
+* PopupWidget: Fix clipping when the popup is forced to be narrower (Bartosz Dziewoński)
+* icons: Invert icons in dark/high contrast mode (Ed Sanders)
+
+### Code
+* Follow-up Ic4d3993d: Setup demo pages after append (Ed Sanders)
+
+
 ## v0.44.1 / 2022-07-12
 ### Features
 * Element: Added `alignToTop` as an option to `scrollIntoView` (Svantje Lilienthal)

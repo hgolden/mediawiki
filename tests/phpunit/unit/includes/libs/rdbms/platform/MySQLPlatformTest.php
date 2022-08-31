@@ -36,6 +36,16 @@ class MySQLPlatformTest extends PHPUnit\Framework\TestCase {
 	}
 
 	/**
+	 * @covers \Wikimedia\Rdbms\Platform\MySQLPlatform::addIdentifierQuotes
+	 */
+	public function testAddIdentifierQuotesNull() {
+		$platform = new MySQLPlatform( new AddQuoterMock() );
+		// Ignore PHP 8.1+ warning about null to str_replace()
+		$quoted = @$platform->addIdentifierQuotes( null );
+		$this->assertEquals( '``', $quoted );
+	}
+
+	/**
 	 * Feeds testAddIdentifierQuotes
 	 *
 	 * Named per T22281 convention.
@@ -44,9 +54,6 @@ class MySQLPlatformTest extends PHPUnit\Framework\TestCase {
 		return [
 			// Format: expected, input
 			[ '``', '' ],
-
-			// Yeah I really hate loosely typed PHP idiocies nowadays
-			[ '``', null ],
 
 			// Dear codereviewer, guess what addIdentifierQuotes()
 			// will return with thoses:

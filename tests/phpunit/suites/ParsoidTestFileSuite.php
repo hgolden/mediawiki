@@ -1,9 +1,9 @@
 <?php
 
-use MediaWiki\Tests\TestMode as ParserTestMode;
 use PHPUnit\Framework\TestSuite;
 use Wikimedia\Parsoid\ParserTests\Test as ParserTest;
 use Wikimedia\Parsoid\ParserTests\TestFileReader;
+use Wikimedia\Parsoid\ParserTests\TestMode as ParserTestMode;
 use Wikimedia\ScopedCallback;
 
 /**
@@ -46,9 +46,22 @@ class ParsoidTestFileSuite extends TestSuite {
 		if ( $skipMessage !== null ) {
 			return;
 		}
-
 		$validTestModes = $this->ptRunner->getRequestedTestModes();
-		$skipMode = new ParserTestMode( $validTestModes[0] );
+		// Dummy mode, for the purpose of satisfying the signature of getTestSkipMessage
+		// Only used for an isLegacy check, which should always be false for this file
+		$skipMode = new ParserTestMode( 'not-legacy' );
+
+		// This is expected to be set at this point. $skipMessage above will have
+		// skipped the file if not.
+		$modeRestriction = $this->ptFileInfo->fileOptions['parsoid-compatible'];
+		// Treat 'parsoid-compatible' as enabling all modes.
+		if ( $modeRestriction !== '' ) {
+			if ( is_string( $modeRestriction ) ) {
+				// shorthand
+				$modeRestriction = [ $modeRestriction ];
+			}
+			$validTestModes = array_intersect( $validTestModes, $modeRestriction );
+		}
 
 		$suite = $this;
 		foreach ( $this->ptFileInfo->testCases as $t ) {

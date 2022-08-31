@@ -113,7 +113,7 @@ class MediaWikiTitleCodec implements TitleFormatter, TitleParser {
 	 * @param string $text
 	 *
 	 * @throws InvalidArgumentException If the namespace is invalid
-	 * @return string Namespace name with underscores (not spaces)
+	 * @return string Namespace name with underscores (not spaces), e.g. 'User_talk'
 	 */
 	public function getNamespaceName( $namespace, $text ) {
 		if ( $this->language->needsGenderDistinction() &&
@@ -367,6 +367,12 @@ class MediaWikiTitleCodec implements TitleFormatter, TitleParser {
 		# Sometimes they slip into cut-n-pasted page titles, where the
 		# override chars get included in list displays.
 		$dbkey = preg_replace( '/[\x{200E}\x{200F}\x{202A}-\x{202E}]+/u', '', $dbkey );
+
+		if ( $dbkey === null ) {
+			# Regex had an error. Most likely this is caused by invalid UTF-8
+			$exception = ( $this->createMalformedTitleException )( 'title-invalid-utf8', $text );
+			throw $exception;
+		}
 
 		# Clean up whitespace
 		# Note: use of the /u option on preg_replace here will cause

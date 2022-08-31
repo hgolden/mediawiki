@@ -23,6 +23,7 @@
  * @copyright © 2013 Wikimedia Foundation Inc.
  */
 
+use MediaWiki\Logger\LoggerFactory;
 use Wikimedia\Rdbms\ChronologyProtector;
 use Wikimedia\Rdbms\Database;
 use Wikimedia\Rdbms\DatabaseDomain;
@@ -43,26 +44,27 @@ use Wikimedia\TestingAccessWrapper;
  * @covers \Wikimedia\Rdbms\LBFactoryMulti
  */
 class LBFactoryTest extends MediaWikiIntegrationTestCase {
+
+	private function getPrimaryServerConfig() {
+		global $wgDBserver, $wgDBname, $wgDBuser, $wgDBpassword, $wgDBtype, $wgSQLiteDataDir;
+		return [
+			'host'        => $wgDBserver,
+			'dbname'      => $wgDBname,
+			'user'        => $wgDBuser,
+			'password'    => $wgDBpassword,
+			'type'        => $wgDBtype,
+			'dbDirectory' => $wgSQLiteDataDir,
+			'load'        => 0,
+			'flags'       => DBO_TRX // REPEATABLE-READ for consistency
+		];
+	}
+
 	/**
 	 * @covers \Wikimedia\Rdbms\LBFactory::getLocalDomainID()
 	 * @covers \Wikimedia\Rdbms\LBFactory::resolveDomainID()
 	 */
 	public function testLBFactorySimpleServer() {
-		global $wgDBserver, $wgDBname, $wgDBuser, $wgDBpassword, $wgDBtype, $wgSQLiteDataDir;
-
-		$servers = [
-			[
-				'host'        => $wgDBserver,
-				'dbname'      => $wgDBname,
-				'user'        => $wgDBuser,
-				'password'    => $wgDBpassword,
-				'type'        => $wgDBtype,
-				'dbDirectory' => $wgSQLiteDataDir,
-				'load'        => 0,
-				'flags'       => DBO_TRX // REPEATABLE-READ for consistency
-			],
-		];
-
+		$servers = [ $this->getPrimaryServerConfig() ];
 		$factory = new LBFactorySimple( [ 'servers' => $servers ] );
 		$lb = $factory->getMainLB();
 
@@ -81,29 +83,14 @@ class LBFactoryTest extends MediaWikiIntegrationTestCase {
 	}
 
 	public function testLBFactorySimpleServers() {
-		global $wgDBserver, $wgDBname, $wgDBuser, $wgDBpassword, $wgDBtype, $wgSQLiteDataDir;
+		global $wgDBserver;
+
+		$primaryConfig = $this->getPrimaryServerConfig();
+		$fakeReplica = [ 'load' => 100, ] + $primaryConfig;
 
 		$servers = [
-			[ // master
-				'host'        => $wgDBserver,
-				'dbname'      => $wgDBname,
-				'user'        => $wgDBuser,
-				'password'    => $wgDBpassword,
-				'type'        => $wgDBtype,
-				'dbDirectory' => $wgSQLiteDataDir,
-				'load'        => 0,
-				'flags'       => DBO_TRX // REPEATABLE-READ for consistency
-			],
-			[ // emulated replica
-				'host'        => $wgDBserver,
-				'dbname'      => $wgDBname,
-				'user'        => $wgDBuser,
-				'password'    => $wgDBpassword,
-				'type'        => $wgDBtype,
-				'dbDirectory' => $wgSQLiteDataDir,
-				'load'        => 100,
-				'flags'       => DBO_TRX // REPEATABLE-READ for consistency
-			]
+			$primaryConfig,
+			$fakeReplica
 		];
 
 		$factory = new LBFactorySimple( [
@@ -113,20 +100,29 @@ class LBFactoryTest extends MediaWikiIntegrationTestCase {
 		$lb = $factory->getMainLB();
 
 		$dbw = $lb->getConnection( DB_PRIMARY );
+		$dbw->ensureConnection();
+		$wConn = TestingAccessWrapper::newFromObject( $dbw )->conn;
+		$wConnWrap = TestingAccessWrapper::newFromObject( $wConn );
+
 		$this->assertEquals(
 			$dbw::ROLE_STREAMING_MASTER, $dbw->getTopologyRole(), 'primary shows as primary' );
+		$this->assertInstanceOf( IDatabase::class, $wConnWrap->topologicalPrimaryConnRef );
 		$this->assertEquals(
 			( $wgDBserver != '' ) ? $wgDBserver : 'localhost',
-			$dbw->getTopologyRootPrimary(),
+			$wConnWrap->topologicalPrimaryConnRef->getServerName(),
 			'cluster primary is set' );
 
 		$dbr = $lb->getConnection( DB_REPLICA );
-		$this->assertEquals(
-			$dbr::ROLE_STREAMING_REPLICA, $dbr->getTopologyRole(), 'replica shows as replica' );
+		$dbr->ensureConnection();
+		$rConn = TestingAccessWrapper::newFromObject( $dbr )->conn;
+		$rConnWrap = TestingAccessWrapper::newFromObject( $rConn );
 
 		$this->assertEquals(
+			$dbr::ROLE_STREAMING_REPLICA, $dbr->getTopologyRole(), 'replica shows as replica' );
+		$this->assertInstanceOf( IDatabase::class, $rConnWrap->topologicalPrimaryConnRef );
+		$this->assertEquals(
 			( $wgDBserver != '' ) ? $wgDBserver : 'localhost',
-			$dbr->getTopologyRootPrimary(),
+			$rConnWrap->topologicalPrimaryConnRef->getServerName(),
 			'cluster primary is set'
 		);
 
@@ -402,6 +398,7 @@ class LBFactoryTest extends MediaWikiIntegrationTestCase {
 			'hostsByName' => [
 				'test-db1' => $wgDBserver,
 			],
+			'replLogger' => LoggerFactory::getInstance( 'DBReplication' ),
 			'loadMonitor' => [ 'class' => LoadMonitorNull::class ],
 			'localDomain' => new DatabaseDomain( $wgDBname, null, $wgDBprefix ),
 			'agent' => 'MW-UNIT-TESTS'
@@ -795,22 +792,134 @@ class LBFactoryTest extends MediaWikiIntegrationTestCase {
 		] );
 		$lbFactory->setRequestInfo( [ 'ChronologyClientId' => 'ii' ] );
 
-		$mockWallClock = 1549343530.2053;
+		// 2019-02-05T05:03:20Z
+		$mockWallClock = 1549343000.0;
 		$priorTime = $mockWallClock; // reference time
 		$lbFactory->setMockTime( $mockWallClock );
 
-		$key = $store->makeGlobalKey( ChronologyProtector::class, 'ii', 'v2' );
-		$store->set(
-			$key,
-			[
-				'positions' => [],
-				'timestamps' => [ $lbFactory::CLUSTER_MAIN_DEFAULT => $priorTime ]
-			],
+		$lbWrap = TestingAccessWrapper::newFromObject( $lbFactory );
+		$cpWrap = TestingAccessWrapper::newFromObject( $lbWrap->getChronologyProtector() );
+		$cpWrap->store->set(
+			$cpWrap->key,
+			$cpWrap->mergePositions(
+				false,
+				[],
+				[
+					$lbFactory::CLUSTER_MAIN_DEFAULT => $priorTime
+				]
+			),
 			3600
 		);
 
 		$mockWallClock += 1.0;
 		$touched = $lbFactory->getChronologyProtectorTouched();
 		$this->assertEquals( $priorTime, $touched );
+	}
+
+	public function testReconfigure() {
+		$primaryConfig = $this->getPrimaryServerConfig();
+		$fakeReplica = [ 'load' => 100, ] + $primaryConfig;
+
+		$conf = [ 'servers' => [
+			$primaryConfig,
+			$fakeReplica
+		] ];
+
+		// Configure an LBFactory with one replica
+		$factory = new LBFactorySimple( $conf );
+		$lb = $factory->getMainLB();
+		$this->assertSame( 2, $lb->getServerCount() );
+
+		$con = $lb->getConnectionInternal( DB_REPLICA );
+		$ref = $lb->getConnection( DB_REPLICA );
+
+		// Call reconfigure with the same config, should have no effect
+		$changed = $factory->reconfigure( $conf );
+		$this->assertFalse( $changed );
+		$this->assertSame( 2, $lb->getServerCount() );
+		$this->assertTrue( $con->isOpen() );
+		$this->assertTrue( $ref->isOpen() );
+
+		// Call reconfigure with empty config, should have no effect
+		$changed = $factory->reconfigure( [] );
+		$this->assertFalse( $changed );
+		$this->assertSame( 2, $lb->getServerCount() );
+		$this->assertTrue( $con->isOpen() );
+		$this->assertTrue( $ref->isOpen() );
+
+		// Reconfigure the LBFactory to only have a single server.
+		$conf['servers'] = [ $this->getPrimaryServerConfig() ];
+		$changed = $factory->reconfigure( $conf );
+		$this->assertTrue( $changed );
+
+		// The LoadBalancer should have been reconfigured automatically.
+		$this->assertSame( 1, $lb->getServerCount() );
+
+		// Reconfiguring should not close connections immediately.
+		$this->assertTrue( $con->isOpen() );
+
+		// Connection refs should detect the config change, close the old connection,
+		// and get a new connection.
+		$this->assertTrue( $ref->isOpen() );
+		$this->assertSame( IDatabase::ROLE_STREAMING_MASTER, $ref->getTopologyRole() );
+
+		// The old connection should have been called by DBConnRef.
+		$this->assertFalse( $con->isOpen() );
+	}
+
+	public function testAutoReconfigure() {
+		$primaryConfig = $this->getPrimaryServerConfig();
+		$fakeReplica = [ 'load' => 100, ] + $primaryConfig;
+
+		$conf = [
+			'servers' => [
+				$primaryConfig,
+				$fakeReplica
+			],
+		];
+
+		// The config callback should return $conf, reflecting changes
+		// made to the local variable.
+		$conf['configCallback'] = static function () use ( &$conf ) {
+			return $conf;
+		};
+
+		// Configure an LBFactory with one replica
+		$factory = new LBFactorySimple( $conf );
+
+		$lb = $factory->getMainLB();
+		$this->assertSame( 2, $lb->getServerCount() );
+
+		$con = $lb->getConnectionInternal( DB_REPLICA );
+		$ref = $lb->getConnection( DB_REPLICA );
+
+		// Nothing changed, autoReconfigure() should do nothing.
+		$changed = $factory->autoReconfigure();
+		$this->assertFalse( $changed );
+
+		$this->assertSame( 2, $lb->getServerCount() );
+		$this->assertTrue( $con->isOpen() );
+		$this->assertTrue( $ref->isOpen() );
+
+		// Change config to only have a single server.
+		$conf['servers'] = [ $this->getPrimaryServerConfig() ];
+
+		// Now autoReconfigure() should detect the change and reconfigure all LoadBalancers.
+		$changed = $factory->autoReconfigure();
+		$this->assertTrue( $changed );
+
+		// The LoadBalancer should have been reconfigured now.
+		$this->assertSame( 1, $lb->getServerCount() );
+
+		// Reconfiguring should not close connections immediately.
+		$this->assertTrue( $con->isOpen() );
+
+		// Connection refs should detect the config change, close the old connection,
+		// and get a new connection.
+		$this->assertTrue( $ref->isOpen() );
+		$this->assertSame( IDatabase::ROLE_STREAMING_MASTER, $ref->getTopologyRole() );
+
+		// The old connection should have been called by DBConnRef.
+		$this->assertFalse( $con->isOpen() );
 	}
 }

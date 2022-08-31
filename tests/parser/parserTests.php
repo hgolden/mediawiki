@@ -92,9 +92,6 @@ class ParserTestsMaintenance extends Maintenance {
 			'are: removeTbody to remove <tbody> tags; and trimWhitespace ' .
 			'to trim whitespace from the start and end of text nodes.',
 			false, true );
-		$this->addOption( 'use-tidy-config',
-			'Use the wiki\'s Tidy configuration instead of known-good' .
-			'defaults.' );
 		$this->addOption( 'wt2html', 'Parsoid: Wikitext -> HTML' );
 		$this->addOption( 'wt2wt',
 			'Parsoid Roundtrip testing: Wikitext -> HTML(DOM) -> Wikitext' );
@@ -194,11 +191,9 @@ class ParserTestsMaintenance extends Maintenance {
 
 		$recorderLB = false;
 		if ( $record || $compare ) {
-			$lbFactory = MediaWikiServices::getInstance()->getDBLoadBalancerFactory();
-			$recorderLB = $lbFactory->newMainLB();
-			// This connection will have the wiki's table prefix, not parsertest_
+			// Make an untracked DB_PRIMARY connection (wiki's table prefix, not parsertest_)
+			$recorderLB = MediaWikiServices::getInstance()->getDBLoadBalancerFactory()->newMainLB();
 			$recorderDB = $recorderLB->getMaintenanceConnectionRef( DB_PRIMARY );
-
 			// Add recorder before previewer because recorder will create the
 			// DB table if it doesn't exist
 			if ( $record ) {
@@ -227,7 +222,6 @@ class ParserTestsMaintenance extends Maintenance {
 			'keep-uploads' => $this->hasOption( 'keep-uploads' ),
 			'run-disabled' => $this->hasOption( 'run-disabled' ),
 			'disable-save-parse' => $this->hasOption( 'disable-save-parse' ),
-			'use-tidy-config' => $this->hasOption( 'use-tidy-config' ),
 			'file-backend' => $this->getOption( 'file-backend' ),
 			'upload-dir' => $this->getOption( 'upload-dir' ),
 			// Passing a parsoid-specific option implies --parsoid
@@ -252,6 +246,11 @@ class ParserTestsMaintenance extends Maintenance {
 		$ok = $tester->runTestsFromFiles( $files );
 		if ( $recorderLB ) {
 			$recorderLB->closeAll( __METHOD__ );
+		}
+		if ( $tester->unexpectedTestPasses ) {
+			$recorder->warning( "There were some unexpected passing tests. " .
+				"Please rerun with --updateKnownFailures option." );
+			$ok = false;
 		}
 		if ( !$ok ) {
 			exit( 1 );

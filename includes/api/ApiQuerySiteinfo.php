@@ -536,12 +536,12 @@ class ApiQuerySiteinfo extends ApiQueryBase {
 			if ( $interwikiMagic && in_array( $prefix, $extraLangPrefixes ) ) {
 				$val['extralanglink'] = true;
 
-				$linktext = wfMessage( "interlanguage-link-$prefix" );
+				$linktext = $this->msg( "interlanguage-link-$prefix" );
 				if ( !$linktext->isDisabled() ) {
 					$val['linktext'] = $linktext->text();
 				}
 
-				$sitename = wfMessage( "interlanguage-link-sitename-$prefix" );
+				$sitename = $this->msg( "interlanguage-link-sitename-$prefix" );
 				if ( !$sitename->isDisabled() ) {
 					$val['sitename'] = $sitename->text();
 				}
@@ -782,7 +782,7 @@ class ApiQuerySiteinfo extends ApiQueryBase {
 		$config = $this->getConfig();
 		$rightsPage = $config->get( MainConfigNames::RightsPage );
 		// The default value is null, but the installer sets it to empty string
-		if ( strlen( $rightsPage ) ) {
+		if ( strlen( (string)$rightsPage ) ) {
 			$title = Title::newFromText( $rightsPage );
 			$url = wfExpandUrl( $title->getLinkURL(), PROTO_CURRENT );
 		} else {
@@ -790,7 +790,7 @@ class ApiQuerySiteinfo extends ApiQueryBase {
 			$url = $config->get( MainConfigNames::RightsUrl );
 		}
 		$text = $config->get( MainConfigNames::RightsText );
-		if ( $title && !strlen( $text ) ) {
+		if ( $title && !strlen( (string)$text ) ) {
 			$text = $title->getPrefixedText();
 		}
 

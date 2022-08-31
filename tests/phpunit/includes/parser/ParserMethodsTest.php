@@ -1,5 +1,6 @@
 <?php
 
+use MediaWiki\MainConfigNames;
 use MediaWiki\MediaWikiServices;
 use MediaWiki\Revision\MutableRevisionRecord;
 use MediaWiki\Revision\RevisionStore;
@@ -72,6 +73,38 @@ class ParserMethodsTest extends MediaWikiLangTestCase {
 	 */
 	public function testStripOuterParagraph( $text, $expected ) {
 		$this->assertEquals( $expected, Parser::stripOuterParagraph( $text ) );
+	}
+
+	public static function provideFormatPageTitle() {
+		return [
+			"Non-main namespace" => [
+				[ 'Talk', ':', 'Hello' ],
+				'<span class="mw-page-title-namespace">Talk</span><span class="mw-page-title-separator">:</span><span class="mw-page-title-main">Hello</span>',
+			],
+			"Main namespace (ignores the separator)" => [
+				[ '', ':', 'Hello' ],
+				'<span class="mw-page-title-main">Hello</span>',
+			],
+			"Pieces are HTML-escaped" => [
+				[ 'Ta&lk', ':', 'He&llo' ],
+				'<span class="mw-page-title-namespace">Ta&amp;lk</span><span class="mw-page-title-separator">:</span><span class="mw-page-title-main">He&amp;llo</span>',
+			],
+			"In the future, the colon separator could be localized" => [
+				[ 'Talk', ' : ', 'Hello' ],
+				'<span class="mw-page-title-namespace">Talk</span><span class="mw-page-title-separator"> : </span><span class="mw-page-title-main">Hello</span>',
+			],
+			"In the future, displaytitle could be customized separately from the namespace" => [
+				[ 'Talk', ':', new HtmlArmor( '<span class="whatever">Hello</span>' ) ],
+				'<span class="mw-page-title-namespace">Talk</span><span class="mw-page-title-separator">:</span><span class="mw-page-title-main"><span class="whatever">Hello</span></span>',
+			],
+		];
+	}
+
+	/**
+	 * @dataProvider provideFormatPageTitle
+	 */
+	public function testFormatPageTitle( $args, $expected ) {
+		$this->assertEquals( $expected, Parser::formatPageTitle( ...$args ) );
 	}
 
 	public function testRecursiveParse() {
@@ -375,7 +408,7 @@ class ParserMethodsTest extends MediaWikiLangTestCase {
 
 	/** @dataProvider provideGuessSectionNameFromWikiText */
 	public function testGuessSectionNameFromWikiText( $input, $mode, $expected ) {
-		$this->setMwGlobals( [ 'wgFragmentMode' => [ $mode ] ] );
+		$this->overrideConfigValue( MainConfigNames::FragmentMode, [ $mode ] );
 		$result = $this->getServiceContainer()->getParser()
 			->guessSectionNameFromWikiText( $input );
 		$this->assertEquals( $expected, $result );

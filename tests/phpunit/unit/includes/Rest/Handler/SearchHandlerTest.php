@@ -6,6 +6,7 @@ use HashConfig;
 use InvalidArgumentException;
 use Language;
 use MediaWiki\Linker\LinkTarget;
+use MediaWiki\MainConfigNames;
 use MediaWiki\Page\PageIdentity;
 use MediaWiki\Page\PageIdentityValue;
 use MediaWiki\Page\PageStore;
@@ -17,6 +18,7 @@ use MediaWiki\Rest\LocalizedHttpException;
 use MediaWiki\Rest\RequestData;
 use MediaWiki\Search\Entity\SearchResultThumbnail;
 use MediaWiki\Tests\Unit\DummyServicesTrait;
+use MediaWiki\User\UserOptionsLookup;
 use MockSearchResultSet;
 use MockTitleTrait;
 use PHPUnit\Framework\MockObject\MockObject;
@@ -68,16 +70,24 @@ class SearchHandlerTest extends \MediaWikiUnitTestCase {
 		$mockTitleFormatter = null
 	) {
 		$config = new HashConfig( [
-			'SearchType' => 'test',
-			'SearchTypeAlternatives' => [],
-			'NamespacesToBeSearchedDefault' => [ NS_MAIN => true ],
-			'SearchSuggestCacheExpiry' => 1200,
+			MainConfigNames::SearchType => 'test',
+			MainConfigNames::SearchTypeAlternatives => [],
+			MainConfigNames::NamespacesToBeSearchedDefault => [ NS_MAIN => true ],
+			MainConfigNames::SearchSuggestCacheExpiry => 1200,
 		] );
 
 		/** @var Language|MockObject $language */
 		$language = $this->createNoOpMock( Language::class );
 		$hookContainer = $this->createHookContainer();
-		$searchEngineConfig = new \SearchEngineConfig( $config, $language, $hookContainer, [] );
+		/** @var UserOptionsLookup|MockObject $userOptionsLookup */
+		$userOptionsLookup = $this->createMock( UserOptionsLookup::class );
+		$searchEngineConfig = new \SearchEngineConfig(
+			$config,
+			$language,
+			$hookContainer,
+			[],
+			$userOptionsLookup
+		);
 
 		if ( !$permissionManager ) {
 			$permissionManager = $this->createMock( PermissionManager::class );

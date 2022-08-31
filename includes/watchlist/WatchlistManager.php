@@ -40,7 +40,6 @@ use NamespaceInfo;
 use ReadOnlyMode;
 use Status;
 use StatusValue;
-use TitleValue;
 use User;
 use WatchedItemStoreInterface;
 use Wikimedia\ParamValidator\TypeDef\ExpiryDef;
@@ -56,7 +55,8 @@ class WatchlistManager {
 	 * @internal For use by ServiceWiring
 	 */
 	public const CONSTRUCTOR_OPTIONS = [
-		'UseEnotif',
+		MainConfigNames::EnotifUserTalk,
+		MainConfigNames::EnotifWatchlist,
 		MainConfigNames::ShowUpdatedMarker,
 	];
 
@@ -165,7 +165,8 @@ class WatchlistManager {
 
 		$user = $performer->getUser();
 
-		if ( !$this->options->get( 'UseEnotif' ) &&
+		if ( !$this->options->get( MainConfigNames::EnotifUserTalk ) &&
+			!$this->options->get( MainConfigNames::EnotifWatchlist ) &&
 			!$this->options->get( MainConfigNames::ShowUpdatedMarker )
 		) {
 			$this->talkPageNotificationManager->removeUserHasNewMessages( $user );
@@ -230,7 +231,8 @@ class WatchlistManager {
 			$this->talkPageNotificationManager->clearForPageView( $userIdentity, $oldRev );
 		}
 
-		if ( !$this->options->get( 'UseEnotif' ) &&
+		if ( !$this->options->get( MainConfigNames::EnotifUserTalk ) &&
+			!$this->options->get( MainConfigNames::EnotifWatchlist ) &&
 			!$this->options->get( MainConfigNames::ShowUpdatedMarker )
 		) {
 			return;
@@ -499,8 +501,7 @@ class WatchlistManager {
 		}
 
 		// Only call addWatchIgnoringRights() or removeWatch() if there's been a change in the watched status.
-		$link = TitleValue::newFromPage( $target );
-		$oldWatchedItem = $this->watchedItemStore->getWatchedItem( $performer->getUser(), $link );
+		$oldWatchedItem = $this->watchedItemStore->getWatchedItem( $performer->getUser(), $target );
 		$changingWatchStatus = (bool)$oldWatchedItem !== $watch;
 		if ( $oldWatchedItem && $expiry !== null ) {
 			// If there's an old watched item, a non-null change to the expiry requires an UPDATE.

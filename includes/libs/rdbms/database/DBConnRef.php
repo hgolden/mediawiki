@@ -36,34 +36,69 @@ class DBConnRef implements IMaintainableDatabase {
 	/** @var int One of DB_PRIMARY/DB_REPLICA */
 	private $role;
 
+	/**
+	 * @var int Reference to the $modcount passed to the constructor.
+	 *      $conn is valid if $modCountRef and $modCountFix are the same.
+	 */
+	private $modCountRef;
+
+	/**
+	 * @var int Last known good value of $modCountRef
+	 *      $conn is valid if $modCountRef and $modCountFix are the same.
+	 */
+	private $modCountFix;
+
 	private const FLD_INDEX = 0;
 	private const FLD_GROUP = 1;
 	private const FLD_DOMAIN = 2;
 	private const FLD_FLAGS = 3;
 
 	/**
+	 * @internal May not be used outside Rdbms LoadBalancer
 	 * @param ILoadBalancer $lb Connection manager for $conn
-	 * @param IDatabase|array $conn Database or (server index, query groups, domain, flags)
+	 * @param array $params [server index, query groups, domain, flags]
 	 * @param int $role The type of connection asked for; one of DB_PRIMARY/DB_REPLICA
-	 * @internal This method should not be called outside of LoadBalancer
+	 * @param null|int &$modcount Reference to a modification counter. This is for
+	 *  LoadBalancer::reconfigure to indicate that a new connection should be acquired.
 	 */
-	public function __construct( ILoadBalancer $lb, $conn, $role ) {
-		$this->lb = $lb;
-		$this->role = $role;
-		if ( $conn instanceof IDatabase && !( $conn instanceof DBConnRef ) ) {
-			$this->conn = $conn; // live handle
-		} elseif ( is_array( $conn ) && count( $conn ) >= 4 && $conn[self::FLD_DOMAIN] !== false ) {
-			$this->params = $conn;
-		} else {
+	public function __construct( ILoadBalancer $lb, $params, $role, &$modcount = 0 ) {
+		if ( !is_array( $params ) || count( $params ) < 4 || $params[self::FLD_DOMAIN] === false ) {
 			throw new InvalidArgumentException( "Missing lazy connection arguments." );
+		}
+
+		$this->lb = $lb;
+		$this->params = $params;
+		$this->role = $role;
+
+		// $this->conn is valid as long as $this->modCountRef and $this->modCountFix are the same.
+		$this->modCountRef = &$modcount; // remember reference
+		$this->modCountFix = $modcount;  // remember current value
+	}
+
+	/**
+	 * Connect to the database if we are not already connected.
+	 */
+	public function ensureConnection() {
+		if ( $this->modCountFix !== $this->modCountRef ) {
+			// Discard existing connection, unless we are in an ongoing transaction.
+			// This is triggered by LoadBalancer::reconfigure(), to allow changed settings
+			// to take effect. The primary use case are replica servers being taken out of
+			// rotation, or the primary database changing.
+			if ( !$this->conn->trxLevel() ) {
+				$this->lb->closeConnection( $this->conn );
+				$this->conn = null;
+			}
+		}
+
+		if ( $this->conn === null ) {
+			[ $index, $groups, $wiki, $flags ] = $this->params;
+			$this->conn = $this->lb->getConnectionInternal( $index, $groups, $wiki, $flags );
+			$this->modCountFix = $this->modCountRef;
 		}
 	}
 
 	public function __call( $name, array $arguments ) {
-		if ( $this->conn === null ) {
-			list( $index, $groups, $wiki, $flags ) = $this->params;
-			$this->conn = $this->lb->getConnectionInternal( $index, $groups, $wiki, $flags );
-		}
+		$this->ensureConnection();
 
 		return $this->conn->$name( ...$arguments );
 	}
@@ -88,10 +123,6 @@ class DBConnRef implements IMaintainableDatabase {
 		return $this->__call( __FUNCTION__, func_get_args() );
 	}
 
-	public function getTopologyRootPrimary() {
-		return $this->__call( __FUNCTION__, func_get_args() );
-	}
-
 	public function trxLevel() {
 		return $this->__call( __FUNCTION__, func_get_args() );
 	}
@@ -105,27 +136,39 @@ class DBConnRef implements IMaintainableDatabase {
 	}
 
 	public function tablePrefix( $prefix = null ) {
-		if ( $this->conn === null && $prefix === null ) {
-			$domain = DatabaseDomain::newFromId( $this->params[self::FLD_DOMAIN] );
+		if ( $prefix !== null ) {
+			// Disallow things that might confuse the LoadBalancer tracking
+			throw $this->getDomainChangeException();
+		}
+
+		if ( $this->conn === null ) {
 			// Avoid triggering a database connection
-			return $domain->getTablePrefix();
+			$domain = DatabaseDomain::newFromId( $this->params[self::FLD_DOMAIN] );
+			$prefix = $domain->getTablePrefix();
 		} else {
 			// This will just return the prefix
-			return $this->__call( __FUNCTION__, func_get_args() );
+			$prefix = $this->__call( __FUNCTION__, func_get_args() );
 		}
+
+		return $prefix;
 	}
 
 	public function dbSchema( $schema = null ) {
-		if ( $this->conn === null && $schema === null ) {
-			$domain = DatabaseDomain::newFromId( $this->params[self::FLD_DOMAIN] );
-			// Avoid triggering a database connection
-			return $domain->getSchema();
-		} elseif ( $this->conn !== null && $schema === null ) {
-			// This will just return the schema
-			return $this->__call( __FUNCTION__, func_get_args() );
+		if ( $schema !== null ) {
+			// Disallow things that might confuse the LoadBalancer tracking
+			throw $this->getDomainChangeException();
 		}
-		// Disallow things that might confuse the LoadBalancer tracking
-		throw $this->getDomainChangeException();
+
+		if ( $this->conn === null ) {
+			// Avoid triggering a database connection
+			$domain = DatabaseDomain::newFromId( $this->params[self::FLD_DOMAIN] );
+			$schema = (string)$domain->getSchema();
+		} else {
+			// This will just return the schema
+			$schema = $this->__call( __FUNCTION__, func_get_args() );
+		}
+
+		return $schema;
 	}
 
 	public function getLBInfo( $name = null ) {
@@ -203,11 +246,7 @@ class DBConnRef implements IMaintainableDatabase {
 	public function getType() {
 		if ( $this->conn === null ) {
 			// Avoid triggering a database connection
-			if ( $this->params[self::FLD_INDEX] === ILoadBalancer::DB_PRIMARY ) {
-				$index = $this->lb->getWriterIndex();
-			} else {
-				$index = $this->params[self::FLD_INDEX];
-			}
+			$index = $this->normalizeServerIndex( $this->params[self::FLD_INDEX] );
 			if ( $index >= 0 ) {
 				// In theory, if $index is DB_REPLICA, the type could vary
 				return $this->lb->getServerType( $index );
@@ -444,6 +483,15 @@ class DBConnRef implements IMaintainableDatabase {
 	}
 
 	public function getServerName() {
+		if ( $this->conn === null ) {
+			// Avoid triggering a database connection
+			$index = $this->normalizeServerIndex( $this->params[self::FLD_INDEX] );
+			if ( $index >= 0 ) {
+				// If $index is DB_REPLICA, the server name could vary
+				return $this->lb->getServerName( $index );
+			}
+		}
+
 		return $this->__call( __FUNCTION__, func_get_args() );
 	}
 
@@ -858,6 +906,14 @@ class DBConnRef implements IMaintainableDatabase {
 			"is owned by a LoadBalancer instance and possibly shared with other callers. " .
 			"LoadBalancer automatically manages DB domain re-selection of unused handles."
 		);
+	}
+
+	/**
+	 * @param int $i Specific or virtual (DB_PRIMARY/DB_REPLICA) server index
+	 * @return int|mixed
+	 */
+	protected function normalizeServerIndex( $i ) {
+		return ( $i === ILoadBalancer::DB_PRIMARY ) ? $this->lb->getWriterIndex() : $i;
 	}
 
 	/**

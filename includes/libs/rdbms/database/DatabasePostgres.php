@@ -1,7 +1,5 @@
 <?php
 /**
- * This is the Postgres database abstraction layer.
- *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
  * the Free Software Foundation; either version 2 of the License, or
@@ -18,7 +16,6 @@
  * http://www.gnu.org/copyleft/gpl.html
  *
  * @file
- * @ingroup Database
  */
 namespace Wikimedia\Rdbms;
 
@@ -27,6 +24,8 @@ use Wikimedia\Rdbms\Platform\PostgresPlatform;
 use Wikimedia\WaitConditionLoop;
 
 /**
+ * Postgres database abstraction layer.
+ *
  * @ingroup Database
  */
 class DatabasePostgres extends Database {
@@ -67,8 +66,7 @@ class DatabasePostgres extends Database {
 		$this->platform = new PostgresPlatform(
 			$this,
 			$params['queryLogger'],
-			$this->currentDomain->getSchema(),
-			$this->currentDomain->getTablePrefix()
+			$this->currentDomain
 		);
 	}
 
@@ -139,8 +137,7 @@ class DatabasePostgres extends Database {
 			}
 			$this->determineCoreSchema( $schema );
 			$this->currentDomain = new DatabaseDomain( $db, $schema, $tablePrefix );
-			$this->platform->setSchema( $schema );
-			$this->platform->setPrefix( $tablePrefix );
+			$this->platform->setCurrentDomain( $this->currentDomain );
 		} catch ( RuntimeException $e ) {
 			throw $this->newExceptionAfterConnectError( $e->getMessage() );
 		}
@@ -164,8 +161,7 @@ class DatabasePostgres extends Database {
 			);
 		} else {
 			$this->currentDomain = $domain;
-			$this->platform->setSchema( $domain->getSchema() );
-			$this->platform->setPrefix( $domain->getTablePrefix() );
+			$this->platform->setCurrentDomain( $this->currentDomain );
 		}
 
 		return true;
@@ -186,11 +182,6 @@ class DatabasePostgres extends Database {
 
 	protected function closeConnection() {
 		return $this->conn ? pg_close( $this->conn ) : true;
-	}
-
-	protected function isTransactableQuery( $sql ) {
-		return parent::isTransactableQuery( $sql ) &&
-			!preg_match( '/^SELECT\s+pg_(try_|)advisory_\w+\(/', $sql );
 	}
 
 	public function doSingleStatementQuery( string $sql ): QueryStatus {
@@ -343,8 +334,8 @@ class DatabasePostgres extends Database {
 	public function estimateRowCount( $table, $var = '*', $conds = '',
 		$fname = __METHOD__, $options = [], $join_conds = []
 	) {
-		$conds = $this->normalizeConditions( $conds, $fname );
-		$column = $this->extractSingleFieldFromList( $var );
+		$conds = $this->platform->normalizeConditions( $conds, $fname );
+		$column = $this->platform->extractSingleFieldFromList( $var );
 		if ( is_string( $column ) && !in_array( $column, [ '*', '1' ] ) ) {
 			$conds[] = "$column IS NOT NULL";
 		}
@@ -459,45 +450,6 @@ __INDEXATTR__;
 		return $res->numRows() > 0;
 	}
 
-	public function doInsertNonConflicting( $table, array $rows, $fname ) {
-		// Postgres 9.5 supports "ON CONFLICT"
-		if ( $this->getServerVersion() >= 9.5 ) {
-			parent::doInsertNonConflicting( $table, $rows, $fname );
-
-			return;
-		}
-
-		$affectedRowCount = 0;
-		// Emulate INSERT IGNORE via savepoints/rollback
-		$tok = $this->startAtomic( "$fname (outer)", self::ATOMIC_CANCELABLE );
-		try {
-			$encTable = $this->tableName( $table );
-			foreach ( $rows as $row ) {
-				list( $sqlColumns, $sqlTuples ) = $this->makeInsertLists( [ $row ] );
-				$tempsql = "INSERT INTO $encTable ($sqlColumns) VALUES $sqlTuples";
-
-				$this->startAtomic( "$fname (inner)", self::ATOMIC_CANCELABLE );
-				try {
-					$this->query( $tempsql, $fname, self::QUERY_CHANGE_ROWS );
-					$this->endAtomic( "$fname (inner)" );
-					$affectedRowCount++;
-				} catch ( DBQueryError $e ) {
-					$this->cancelAtomic( "$fname (inner)" );
-					// Our IGNORE is supposed to ignore duplicate key errors, but not others.
-					// (even though MySQL's version apparently ignores all errors)
-					if ( $e->errno !== '23505' ) {
-						throw $e;
-					}
-				}
-			}
-		} catch ( RuntimeException $e ) {
-			$this->cancelAtomic( "$fname (outer)", $tok );
-			throw $e;
-		}
-		$this->endAtomic( "$fname (outer)" );
-		$this->affectedRowCount = $affectedRowCount;
-	}
-
 	/**
 	 * INSERT SELECT wrapper
 	 * $varMap must be an associative array of the form [ 'dest1' => 'source1', ... ]
@@ -527,30 +479,22 @@ __INDEXATTR__;
 		$selectJoinConds
 	) {
 		if ( in_array( 'IGNORE', $insertOptions ) ) {
-			if ( $this->getServerVersion() >= 9.5 ) {
-				// Use "ON CONFLICT DO" if we have it for IGNORE
-				$destTable = $this->tableName( $destTable );
+			// Use "ON CONFLICT DO" if we have it for IGNORE
+			$destTable = $this->tableName( $destTable );
 
-				$selectSql = $this->selectSQLText(
-					$srcTable,
-					array_values( $varMap ),
-					$conds,
-					$fname,
-					$selectOptions,
-					$selectJoinConds
-				);
+			$selectSql = $this->selectSQLText(
+				$srcTable,
+				array_values( $varMap ),
+				$conds,
+				$fname,
+				$selectOptions,
+				$selectJoinConds
+			);
 
-				$sql = "INSERT INTO $destTable (" . implode( ',', array_keys( $varMap ) ) . ') ' .
-					$selectSql . ' ON CONFLICT DO NOTHING';
+			$sql = "INSERT INTO $destTable (" . implode( ',', array_keys( $varMap ) ) . ') ' .
+				$selectSql . ' ON CONFLICT DO NOTHING';
 
-				$this->query( $sql, $fname, self::QUERY_CHANGE_ROWS );
-			} else {
-				// IGNORE and we don't have ON CONFLICT DO NOTHING, so just use the non-native version
-				$this->doInsertSelectGeneric(
-					$destTable, $srcTable, $varMap, $conds, $fname,
-					$insertOptions, $selectOptions, $selectJoinConds
-				);
-			}
+			$this->query( $sql, $fname, self::QUERY_CHANGE_ROWS );
 		} else {
 			parent::doInsertSelectNative( $destTable, $srcTable, $varMap, $conds, $fname,
 				$insertOptions, $selectOptions, $selectJoinConds );
@@ -1167,12 +1111,8 @@ SQL;
 	}
 
 	public function doLockIsFree( string $lockName, string $method ) {
-		// http://www.postgresql.org/docs/9.2/static/functions-admin.html#FUNCTIONS-ADVISORY-LOCKS
-		$key = $this->addQuotes( $this->bigintFromLockName( $lockName ) );
-
 		$res = $this->query(
-			"SELECT (CASE(pg_try_advisory_lock($key))
-			WHEN 'f' THEN 'f' ELSE pg_advisory_unlock($key) END) AS unlocked",
+			$this->platform->lockIsFreeSQLText( $lockName ),
 			$method,
 			self::QUERY_CHANGE_LOCKS
 		);
@@ -1182,17 +1122,13 @@ SQL;
 	}
 
 	public function doLock( string $lockName, string $method, int $timeout ) {
-		// http://www.postgresql.org/docs/9.2/static/functions-admin.html#FUNCTIONS-ADVISORY-LOCKS
-		$key = $this->addQuotes( $this->bigintFromLockName( $lockName ) );
+		$sql = $this->platform->lockSQLText( $lockName, $timeout );
 
 		$acquired = null;
 		$loop = new WaitConditionLoop(
-			function () use ( $lockName, $key, $timeout, $method, &$acquired ) {
+			function () use ( $lockName, $sql, $timeout, $method, &$acquired ) {
 				$res = $this->query(
-					"SELECT (CASE WHEN pg_try_advisory_lock($key) " .
-						"THEN EXTRACT(epoch from clock_timestamp()) " .
-						"ELSE NULL " .
-					"END) AS acquired",
+					$sql,
 					$method,
 					self::QUERY_CHANGE_LOCKS
 				);
@@ -1214,11 +1150,8 @@ SQL;
 	}
 
 	public function doUnlock( string $lockName, string $method ) {
-		// http://www.postgresql.org/docs/9.2/static/functions-admin.html#FUNCTIONS-ADVISORY-LOCKS
-		$key = $this->addQuotes( $this->bigintFromLockName( $lockName ) );
-
 		$result = $this->query(
-			"SELECT pg_advisory_unlock($key) AS released",
+			$this->platform->unlockSQLText( $lockName ),
 			$method,
 			self::QUERY_CHANGE_LOCKS
 		);
@@ -1251,14 +1184,6 @@ SQL;
 
 	protected static function getAttributes() {
 		return [ self::ATTR_SCHEMAS_AS_TABLE_GROUPS => true ];
-	}
-
-	/**
-	 * @param string $lockName
-	 * @return string Integer
-	 */
-	private function bigintFromLockName( $lockName ) {
-		return \Wikimedia\base_convert( substr( sha1( $lockName ), 0, 15 ), 16, 10 );
 	}
 }
 

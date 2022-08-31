@@ -11,6 +11,7 @@ use IDBAccessObject;
 use InvalidArgumentException;
 use MediaWiki\Content\IContentHandlerFactory;
 use MediaWiki\Linker\LinkTarget;
+use MediaWiki\MainConfigNames;
 use MediaWiki\MediaWikiServices;
 use MediaWiki\Page\PageIdentity;
 use MediaWiki\Page\PageIdentityValue;
@@ -186,10 +187,10 @@ class RevisionStoreDbTest extends MediaWikiIntegrationTestCase {
 	 * @covers \MediaWiki\Revision\RevisionStore::checkDatabaseDomain
 	 */
 	public function testDomainCheck( $dbDomain, $dbName, $dbPrefix ) {
-		$this->setMwGlobals(
+		$this->overrideConfigValues(
 			[
-				'wgDBname' => $dbName,
-				'wgDBprefix' => $dbPrefix,
+				MainConfigNames::DBname => $dbName,
+				MainConfigNames::DBprefix => $dbPrefix,
 			]
 		);
 
@@ -204,7 +205,6 @@ class RevisionStoreDbTest extends MediaWikiIntegrationTestCase {
 				'schema' => '',
 				'cliMode' => true,
 				'topologyRole' => Database::ROLE_STREAMING_MASTER,
-				'topologicalMaster' => null,
 				'agent' => '',
 				'serverName' => '*dummy*',
 				'load' => 100,
@@ -1280,7 +1280,7 @@ class RevisionStoreDbTest extends MediaWikiIntegrationTestCase {
 	 * @covers \MediaWiki\Revision\RevisionStore::newRevisionFromRowAndSlots
 	 */
 	public function testNewRevisionFromRow_anonEdit_legacyEncoding() {
-		$this->setMwGlobals( 'wgLegacyEncoding', 'windows-1252' );
+		$this->overrideConfigValue( MainConfigNames::LegacyEncoding, 'windows-1252' );
 		$page = $this->getTestPage();
 		$text = __METHOD__ . 'a-ä';
 		/** @var RevisionRecord $revRecord */
@@ -1478,7 +1478,7 @@ class RevisionStoreDbTest extends MediaWikiIntegrationTestCase {
 	 * @covers \MediaWiki\Revision\RevisionStore::newRevisionFromArchiveRowAndSlots
 	 */
 	public function testNewRevisionFromArchiveRow_legacyEncoding() {
-		$this->setMwGlobals( 'wgLegacyEncoding', 'windows-1252' );
+		$this->overrideConfigValue( MainConfigNames::LegacyEncoding, 'windows-1252' );
 		$store = $this->getServiceContainer()->getRevisionStore();
 		$title = Title::newFromText( __METHOD__ );
 		$text = __METHOD__ . '-bä';

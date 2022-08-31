@@ -1,7 +1,5 @@
 <?php
 /**
- * Advanced generator of database load balancing objects for database farms.
- *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
  * the Free Software Foundation; either version 2 of the License, or
@@ -18,9 +16,7 @@
  * http://www.gnu.org/copyleft/gpl.html
  *
  * @file
- * @ingroup Database
  */
-
 namespace Wikimedia\Rdbms;
 
 use InvalidArgumentException;
@@ -28,7 +24,10 @@ use LogicException;
 use UnexpectedValueException;
 
 /**
- * A multi-database, multi-primary DB factory for Wikimedia and similar installations
+ * Advanced manager for multiple database sections, e.g. for large wiki farms.
+ *
+ * This means different wikis can be stored on different database servers.
+ * It includes support for multi-primary setups.
  *
  * @ingroup Database
  */
@@ -106,6 +105,9 @@ class LBFactoryMulti extends LBFactory {
 	 *   - readOnlyBySection: map of (main section => message text or false).
 	 *      String values make sections read only, whereas anything else does not
 	 *      restrict read/write mode. [optional]
+	 *   - configCallback: A callback that returns a conf array that can be passed to
+	 *      the reconfigure() method. This will be used to autoReconfigure() to load
+	 *      any updated configuration.
 	 */
 	public function __construct( array $conf ) {
 		parent::__construct( $conf );

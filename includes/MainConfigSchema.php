@@ -723,7 +723,7 @@ class MainConfigSchema {
 	];
 
 	/**
-	 * The URL path of the shortcut icon.
+	 * The URL path of the icon.
 	 *
 	 * @since 1.6
 	 */
@@ -3286,6 +3286,12 @@ class MainConfigSchema {
 	 * of texts are also rendered as wikitext, it only means that links, magic words, etc will have
 	 * the effect on the database they would have on a wikitext page.
 	 *
+	 * Note that table of contents information will be *suppressed* for all
+	 * text models in this list other than wikitext.
+	 *
+	 * @todo Make the ToC suppression configurable by the content model
+	 * (T313455), not a side effect of inclusion here.
+	 *
 	 * @todo On the long run, it would be nice to put categories etc into a separate structure,
 	 * or at least parse only the contents of comments in the scripts.
 	 * @since 1.21
@@ -3623,7 +3629,6 @@ class MainConfigSchema {
 	 * Otherwise it can cause inaccuracy in data.
 	 *
 	 * @since 1.39
-	 * @warning EXPERIMENTAL!
 	 */
 	public const MultiShardSiteStats = [
 		'default' => false,
@@ -3775,7 +3780,6 @@ class MainConfigSchema {
 	 *   - replicaOnly: Whether to only use replica servers and only support read operations.
 	 *      This option requires the use of LoadBalancer and should only be used by
 	 *      ReplicatedBagOStuff.
-	 *   - syncTimeout: Max seconds to wait for replica DBs to catch up for WRITE_SYNC.
 	 *   - writeBatchSize: Default maximum number of rows to change in each query for write
 	 *      operations that can be chunked into a set of smaller writes.
 	 *
@@ -4227,15 +4231,6 @@ class MainConfigSchema {
 	];
 
 	/**
-	 * Expiry time for the footer link cache, in seconds, or 0 if disabled
-	 *
-	 * @since 1.35
-	 */
-	public const FooterLinkCacheExpiry = [
-		'default' => 0,
-	];
-
-	/**
 	 * When using the file cache, we can store the cached HTML gzipped to save disk
 	 * space. Pages will then also be served compressed to clients that support it.
 	 *
@@ -4529,6 +4524,21 @@ class MainConfigSchema {
 	 */
 	public const UsePrivateIPs = [
 		'default' => false,
+	];
+
+	/**
+	 * Set this to false if MediaWiki is behind a CDN that re-orders query
+	 * parameters on incoming requests.
+	 *
+	 * MediaWiki sets a large 'Cache-Control: s-maxage=' directive on page
+	 * views only if the request URL matches one of the normal CDN URL forms.
+	 * When 'CdnMatchParameterOrder' is false, the matching algorithm ignores
+	 * the order of URL parameters.
+	 *
+	 * @since 1.39
+	 */
+	public const CdnMatchParameterOrder = [
+		'default' => true,
 	];
 
 	// endregion -- end of HTTP proxy settings
@@ -5245,15 +5255,15 @@ class MainConfigSchema {
 	/** @name   ResourceLoader settings */
 
 	/**
-	 * When OutputHandler is used, mangle any output that contains
-	 * <cross-domain-policy>. Without this, an attacker can send their own
-	 * cross-domain policy unless it is prevented by the crossdomain.xml file at
-	 * the domain root.
+	 * Formerly a workaround for a security vulnerability caused by installation
+	 * of Flash as a browser extension.
 	 *
 	 * @since 1.25
+	 * @deprecated since 1.39
 	 */
 	public const MangleFlashPolicy = [
 		'default' => true,
+		'deprecated' => 'since 1.39; no longer has any effect',
 	];
 
 	/**

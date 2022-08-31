@@ -6,9 +6,11 @@ use Article;
 use Config;
 use File;
 use IContextSource;
+use JsonContent;
 use ManualLogEntry;
 use MediaWiki\Linker\LinkRenderer;
 use MediaWiki\Linker\LinkTarget;
+use MediaWiki\Page\PageIdentity;
 use MediaWiki\Page\ProperPageIdentity;
 use MediaWiki\Permissions\Authority;
 use MediaWiki\ResourceLoader as RL;
@@ -71,6 +73,7 @@ class HookRunner implements
 	\MediaWiki\Content\Hook\GetContentModelsHook,
 	\MediaWiki\Content\Hook\GetDifferenceEngineHook,
 	\MediaWiki\Content\Hook\GetSlotDiffRendererHook,
+	\MediaWiki\Content\Hook\JsonValidateSaveHook,
 	\MediaWiki\Content\Hook\PageContentLanguageHook,
 	\MediaWiki\Content\Hook\PlaceNewSectionHook,
 	\MediaWiki\Content\Hook\SearchDataForIndexHook,
@@ -287,7 +290,6 @@ class HookRunner implements
 	\MediaWiki\Hook\ParserFirstCallInitHook,
 	\MediaWiki\Hook\ParserGetVariableValueSwitchHook,
 	\MediaWiki\Hook\ParserGetVariableValueTsHook,
-	\MediaWiki\Hook\ParserGetVariableValueVarCacheHook,
 	\MediaWiki\Hook\ParserLimitReportFormatHook,
 	\MediaWiki\Hook\ParserLimitReportPrepareHook,
 	\MediaWiki\Hook\ParserLogLinterDataHook,
@@ -469,6 +471,7 @@ class HookRunner implements
 	\MediaWiki\Page\Hook\ShowMissingArticleHook,
 	\MediaWiki\Page\Hook\WikiPageDeletionUpdatesHook,
 	\MediaWiki\Page\Hook\WikiPageFactoryHook,
+	\MediaWiki\Permissions\Hook\PermissionErrorAuditHook,
 	\MediaWiki\Permissions\Hook\GetUserPermissionsErrorsExpensiveHook,
 	\MediaWiki\Permissions\Hook\GetUserPermissionsErrorsHook,
 	\MediaWiki\Permissions\Hook\TitleQuickPermissionsHook,
@@ -1942,6 +1945,20 @@ class HookRunner implements
 		);
 	}
 
+	public function onPermissionErrorAudit(
+		LinkTarget $title,
+		UserIdentity $user,
+		string $action,
+		string $rigor,
+		array $errors
+	): void {
+		$this->container->run(
+			'PermissionErrorAudit',
+			[ $title, $user, $action, $rigor, $errors ],
+			[ 'abortable' => false ]
+		);
+	}
+
 	public function onGetUserPermissionsErrors( $title, $user, $action, &$result ) {
 		return $this->container->run(
 			'getUserPermissionsErrors',
@@ -2224,6 +2241,13 @@ class HookRunner implements
 		return $this->container->run(
 			'isValidPassword',
 			[ $password, &$result, $user ]
+		);
+	}
+
+	public function onJsonValidateSave( JsonContent $content, PageIdentity $pageIdentity, StatusValue $status ) {
+		return $this->container->run(
+			'JsonValidateSave',
+			[ $content, $pageIdentity, &$status ]
 		);
 	}
 
@@ -2904,13 +2928,6 @@ class HookRunner implements
 		return $this->container->run(
 			'ParserGetVariableValueTs',
 			[ $parser, &$time ]
-		);
-	}
-
-	public function onParserGetVariableValueVarCache( $parser, &$varCache ) {
-		return $this->container->run(
-			'ParserGetVariableValueVarCache',
-			[ $parser, &$varCache ]
 		);
 	}
 

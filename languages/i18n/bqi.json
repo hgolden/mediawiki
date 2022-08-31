@@ -1,6 +1,7 @@
 {
 	"@metadata": {
 		"authors": [
+			"Amire80",
 			"BaRaN6161 TURK",
 			"Behdarvandyani",
 			"Beyronvan",
@@ -759,7 +760,6 @@
 	"search-category": "(دٱسداْ $1)",
 	"search-file-match": "(یکی کردن میٛنوناْ جانیا)",
 	"search-suggest": "مٱنزۊرت یو بی:$1",
-	"search-interwiki-default": "نتیجاْیٱل $1:",
 	"search-interwiki-more": "(بيشتر)",
 	"search-interwiki-more-results": "نتیجاْیٱل بیشتر",
 	"search-relatedarticle": "ڤا یٱک",
@@ -1457,7 +1457,7 @@
 	"isimage": "جانیا هومپاٛیڤٱند",
 	"whatlinkshere-prev": "{{PLURAL:$1|دیندایی|دیندایی$1}}",
 	"whatlinkshere-next": "{{PLURAL:$1|نیایی |نیایی $1}}",
-	"whatlinkshere-links": "← هومپاٛیڤٱند",
+	"whatlinkshere-links": "→ هومپاٛیڤٱند",
 	"whatlinkshere-hideredirs": "$1 ڤاگٱردۊنی",
 	"whatlinkshere-hidetrans": "ڤارو گونجایشدٱل $1",
 	"whatlinkshere-hidelinks": "هومپاٛیڤٱند سی $1",

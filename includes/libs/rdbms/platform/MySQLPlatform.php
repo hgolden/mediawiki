@@ -100,4 +100,45 @@ class MySQLPlatform extends SQLPlatform {
 
 		return $sql;
 	}
+
+	public function isTransactableQuery( $sql ) {
+		return parent::isTransactableQuery( $sql ) &&
+			!preg_match( '/^SELECT\s+(GET|RELEASE|IS_FREE)_LOCK\(/', $sql );
+	}
+
+	public function buildExcludedValue( $column ) {
+		/* @see DatabaseMysqlBase::doUpsert() */
+		// Within "INSERT INTO ON DUPLICATE KEY UPDATE" statements:
+		//   - MySQL>= 8.0.20 supports and prefers "VALUES ... AS".
+		//   - MariaDB >= 10.3.3 supports and prefers VALUE().
+		//   - Both support the old VALUES() function
+		// https://dev.mysql.com/doc/refman/8.0/en/insert-on-duplicate.html
+		// https://mariadb.com/kb/en/insert-on-duplicate-key-update/
+		return "VALUES($column)";
+	}
+
+	public function lockSQLText( $lockName, $timeout ) {
+		$encName = $this->quoter->addQuotes( $this->makeLockName( $lockName ) );
+		// Unlike NOW(), SYSDATE() gets the time at invocation rather than query start.
+		// The precision argument is silently ignored for MySQL < 5.6 and MariaDB < 5.3.
+		// https://dev.mysql.com/doc/refman/5.6/en/date-and-time-functions.html#function_sysdate
+		// https://dev.mysql.com/doc/refman/5.6/en/fractional-seconds.html
+		return "SELECT IF(GET_LOCK($encName,$timeout),UNIX_TIMESTAMP(SYSDATE(6)),NULL) AS acquired";
+	}
+
+	public function lockIsFreeSQLText( $lockName ) {
+		$encName = $this->quoter->addQuotes( $this->makeLockName( $lockName ) );
+		return "SELECT IS_FREE_LOCK($encName) AS unlocked";
+	}
+
+	public function unlockSQLText( $lockName ) {
+		$encName = $this->quoter->addQuotes( $this->makeLockName( $lockName ) );
+		return "SELECT RELEASE_LOCK($encName) AS released";
+	}
+
+	public function makeLockName( $lockName ) {
+		// https://dev.mysql.com/doc/refman/5.7/en/locking-functions.html#function_get-lock
+		// MySQL 5.7+ enforces a 64 char length limit.
+		return ( strlen( $lockName ) > 64 ) ? sha1( $lockName ) : $lockName;
+	}
 }

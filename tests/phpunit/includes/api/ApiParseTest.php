@@ -230,7 +230,7 @@ class ApiParseTest extends ApiTestCase {
 		$this->doApiRequest( [
 			'action' => 'parse',
 			'oldid' => self::$revIds['revdel'],
-		], null, null, static::getTestUser()->getUser() );
+		], null, null, static::getTestUser()->getAuthority() );
 	}
 
 	public function testSuppressed() {
@@ -955,7 +955,7 @@ class ApiParseTest extends ApiTestCase {
 		] );
 
 		$this->assertSame(
-			'Art&amp;copy',
+			'<span class="mw-page-title-main">Art&amp;copy</span>',
 			$res[0]['parse']['displaytitle']
 		);
 	}

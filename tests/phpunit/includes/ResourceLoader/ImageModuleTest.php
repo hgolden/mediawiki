@@ -13,6 +13,7 @@ use Wikimedia\TestingAccessWrapper;
 
 /**
  * @group ResourceLoader
+ * @covers \MediaWiki\ResourceLoader\ImageModule
  */
 class ImageModuleTest extends ResourceLoaderTestCase {
 
@@ -158,9 +159,6 @@ class ImageModuleTest extends ResourceLoaderTestCase {
 	 *
 	 * This mimics modules modified by skins using 'ResourceModuleSkinStyles' and 'OOUIThemePaths'
 	 * skin attributes.
-	 *
-	 * @covers \MediaWiki\ResourceLoader\FilePath::getLocalBasePath
-	 * @covers \MediaWiki\ResourceLoader\FilePath::getRemoteBasePath
 	 */
 	public function testResourceLoaderFilePath() {
 		$basePath = __DIR__ . '/../../data/blahblah';
@@ -179,6 +177,7 @@ class ImageModuleTest extends ResourceLoaderTestCase {
 				],
 			],
 		] );
+		$testModule->setName( 'testModule' );
 		$expectedModule = new ImageModule( [
 			'localBasePath' => $filePath,
 			'remoteBasePath' => 'rlfilepath',
@@ -193,6 +192,7 @@ class ImageModuleTest extends ResourceLoaderTestCase {
 				],
 			],
 		] );
+		$expectedModule->setName( 'testModule' );
 
 		$context = $this->getResourceLoaderContext();
 		$this->assertEquals(
@@ -204,7 +204,6 @@ class ImageModuleTest extends ResourceLoaderTestCase {
 
 	/**
 	 * @dataProvider providerGetModules
-	 * @covers \MediaWiki\ResourceLoader\ImageModule::getStyles
 	 */
 	public function testGetStyles( $module, $expected ) {
 		$module = new ImageModuleTestable(
@@ -215,9 +214,6 @@ class ImageModuleTest extends ResourceLoaderTestCase {
 		$this->assertEquals( $expected, $styles['all'] );
 	}
 
-	/**
-	 * @covers \MediaWiki\ResourceLoader\Context::getImageObj
-	 */
 	public function testContext() {
 		$context = new Context( new EmptyResourceLoader(), new FauxRequest() );
 		$this->assertFalse( $context->getImageObj(), 'Missing image parameter' );
@@ -280,7 +276,6 @@ TEXT
 
 	/**
 	 * @dataProvider providerGetStyleDeclarations
-	 * @covers \MediaWiki\ResourceLoader\ImageModule::getStyleDeclarations
 	 */
 	public function testGetStyleDeclarations( $dataUriReturnValue, $expected ) {
 		$module = TestingAccessWrapper::newFromObject( new ImageModule() );

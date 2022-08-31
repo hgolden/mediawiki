@@ -542,7 +542,6 @@ return [
 			'RenderHashAppend' => '',
 			'EnableSidebarCache' => false,
 			'SidebarCacheExpiry' => 86400,
-			'FooterLinkCacheExpiry' => 0,
 			'UseGzip' => false,
 			'InvalidateCacheOnLocalSettingsChange' => true,
 			'ExtensionInfoMTime' => false,
@@ -565,6 +564,7 @@ return [
 			],
 			'HTCPMulticastTTL' => 1,
 			'UsePrivateIPs' => false,
+			'CdnMatchParameterOrder' => true,
 			'LanguageCode' => 'en',
 			'GrammarForms' => [
 			],
@@ -3141,6 +3141,9 @@ return [
 			'items' => [
 				'type' => 'string',
 			],
+		],
+		'MangleFlashPolicy' => [
+			'deprecated' => 'since 1.39; no longer has any effect',
 		],
 		'AllowImageTag' => [
 			'deprecated' => 'since 1.35; register an extension tag named <img> instead.',

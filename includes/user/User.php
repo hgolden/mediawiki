@@ -66,6 +66,7 @@ use Wikimedia\Timestamp\ConvertibleTimestamp;
  *
  * @newable in 1.35 only, the constructor is @internal since 1.36
  */
+#[AllowDynamicProperties]
 class User implements Authority, UserIdentity, UserEmailContact {
 	use ProtectedHookAccessorTrait;
 	use WikiAwareEntityTrait;
@@ -2168,7 +2169,9 @@ class User implements Authority, UserIdentity, UserEmailContact {
 			return false;
 		}
 
-		$token = $this->getOption( $oname );
+		$userOptionsLookup = MediaWikiServices::getInstance()
+			->getUserOptionsLookup();
+		$token = $userOptionsLookup->getOption( $this, (string)$oname );
 		if ( !$token ) {
 			// Default to a value based on the user token to avoid space
 			// wasted on storing tokens for all users. When this option
@@ -2181,12 +2184,12 @@ class User implements Authority, UserIdentity, UserEmailContact {
 
 	/**
 	 * Reset a token stored in the preferences (like the watchlist one).
-	 * *Does not* save user's preferences (similarly to setOption()).
+	 * *Does not* save user's preferences (similarly to UserOptionsManager::setOption()).
 	 *
 	 * @param string $oname The option name to reset the token in
 	 * @return string|bool New token value, or false if this option is disabled.
 	 * @see getTokenFromOption()
-	 * @see setOption()
+	 * @see UserOptionsManager::setOption
 	 */
 	public function resetTokenFromOption( $oname ) {
 		$hiddenPrefs =
@@ -2210,7 +2213,9 @@ class User implements Authority, UserIdentity, UserEmailContact {
 		// Important migration for old data rows
 		if ( $this->mDatePreference === null ) {
 			global $wgLang;
-			$value = $this->getOption( 'date' );
+			$userOptionsLookup = MediaWikiServices::getInstance()
+				->getUserOptionsLookup();
+			$value = $userOptionsLookup->getOption( $this, 'date' );
 			$map = $wgLang->getDatePreferenceMigrationMap();
 			if ( isset( $map[$value] ) ) {
 				$value = $map[$value];
@@ -2227,18 +2232,19 @@ class User implements Authority, UserIdentity, UserEmailContact {
 	 * @return bool
 	 */
 	public function requiresHTTPS() {
-		$forceHTTPS =
-			MediaWikiServices::getInstance()->getMainConfig()->get( MainConfigNames::ForceHTTPS );
-		$secureLogin =
-			MediaWikiServices::getInstance()->getMainConfig()->get( MainConfigNames::SecureLogin );
-		if ( $forceHTTPS ) {
-			return true;
-		}
-		if ( !$secureLogin ) {
+		if ( !$this->isRegistered() ) {
 			return false;
 		}
-		return MediaWikiServices::getInstance()
-			->getUserOptionsLookup()
+
+		$services = MediaWikiServices::getInstance();
+		$config = $services->getMainConfig();
+		if ( $config->get( MainConfigNames::ForceHTTPS ) ) {
+			return true;
+		}
+		if ( !$config->get( MainConfigNames::SecureLogin ) ) {
+			return false;
+		}
+		return $services->getUserOptionsLookup()
 			->getBoolOption( $this, 'prefershttps' );
 	}
 
@@ -3216,7 +3222,9 @@ class User implements Authority, UserIdentity, UserEmailContact {
 	 * @return bool
 	 */
 	public function canReceiveEmail() {
-		return $this->isEmailConfirmed() && !$this->getOption( 'disablemail' );
+		$userOptionsLookup = MediaWikiServices::getInstance()
+			->getUserOptionsLookup();
+		return $this->isEmailConfirmed() && !$userOptionsLookup->getOption( $this, 'disablemail' );
 	}
 
 	/**
@@ -3374,10 +3382,11 @@ class User implements Authority, UserIdentity, UserEmailContact {
 	 * Return the tables, fields, and join conditions to be selected to create
 	 * a new user object.
 	 * @since 1.31
-	 * @return array With three keys:
-	 *   - tables: (string[]) to include in the `$table` to `IDatabase->select()`
-	 *   - fields: (string[]) to include in the `$vars` to `IDatabase->select()`
-	 *   - joins: (array) to include in the `$join_conds` to `IDatabase->select()`
+	 * @return array[] With three keys:
+	 *   - tables: (string[]) to include in the `$table` to `IDatabase->select()` or `SelectQueryBuilder::tables`
+	 *   - fields: (string[]) to include in the `$vars` to `IDatabase->select()` or `SelectQueryBuilder::fields`
+	 *   - joins: (array) to include in the `$join_conds` to `IDatabase->select()` or `SelectQueryBuilder::joinConds`
+	 * @phan-return array{tables:string[],fields:string[],joins:array}
 	 */
 	public static function getQueryInfo() {
 		$ret = [

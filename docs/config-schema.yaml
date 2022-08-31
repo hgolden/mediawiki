@@ -318,7 +318,7 @@ config-schema:
     Favicon:
         default: /favicon.ico
         description: |-
-            The URL path of the shortcut icon.
+            The URL path of the icon.
             @since 1.6
     AppleTouchIcon:
         default: false
@@ -2016,6 +2016,10 @@ config-schema:
             Determines which types of text are parsed as wikitext. This does not imply that these kinds
             of texts are also rendered as wikitext, it only means that links, magic words, etc will have
             the effect on the database they would have on a wikitext page.
+            Note that table of contents information will be *suppressed* for all
+            text models in this list other than wikitext.
+            @todo Make the ToC suppression configurable by the content model
+            (T313455), not a side effect of inclusion here.
             @todo On the long run, it would be nice to put categories etc into a separate structure,
             or at least parse only the contents of comments in the scripts.
             @since 1.21
@@ -2237,7 +2241,6 @@ config-schema:
             It should be set to true in really large wikis with big flow of edits,
             Otherwise it can cause inaccuracy in data.
             @since 1.39
-            @warning EXPERIMENTAL!
     CacheDirectory:
         default: false
         description: |-
@@ -2351,7 +2354,6 @@ config-schema:
               - replicaOnly: Whether to only use replica servers and only support read operations.
                  This option requires the use of LoadBalancer and should only be used by
                  ReplicatedBagOStuff.
-              - syncTimeout: Max seconds to wait for replica DBs to catch up for WRITE_SYNC.
               - writeBatchSize: Default maximum number of rows to change in each query for write
                  operations that can be chunked into a set of smaller writes.
             For MemcachedPhpBagOStuff parameters see {@link MemcachedPhpBagOStuff::__construct}
@@ -2630,11 +2632,6 @@ config-schema:
     SidebarCacheExpiry:
         default: 86400
         description: 'Expiry time for the sidebar cache, in seconds'
-    FooterLinkCacheExpiry:
-        default: 0
-        description: |-
-            Expiry time for the footer link cache, in seconds, or 0 if disabled
-            @since 1.35
     UseGzip:
         default: false
         description: |-
@@ -2826,6 +2823,16 @@ config-schema:
     UsePrivateIPs:
         default: false
         description: 'Should forwarded Private IPs be accepted?'
+    CdnMatchParameterOrder:
+        default: true
+        description: |-
+            Set this to false if MediaWiki is behind a CDN that re-orders query
+            parameters on incoming requests.
+            MediaWiki sets a large 'Cache-Control: s-maxage=' directive on page
+            views only if the request URL matches one of the normal CDN URL forms.
+            When 'CdnMatchParameterOrder' is false, the matching algorithm ignores
+            the order of URL parameters.
+            @since 1.39
     LanguageCode:
         default: en
         description: |-
@@ -3272,12 +3279,12 @@ config-schema:
             unconditionally.
     MangleFlashPolicy:
         default: true
+        deprecated: 'since 1.39; no longer has any effect'
         description: |-
-            When OutputHandler is used, mangle any output that contains
-            <cross-domain-policy>. Without this, an attacker can send their own
-            cross-domain policy unless it is prevented by the crossdomain.xml file at
-            the domain root.
+            Formerly a workaround for a security vulnerability caused by installation
+            of Flash as a browser extension.
             @since 1.25
+            @deprecated since 1.39
     ResourceModules:
         default: {  }
         type: object

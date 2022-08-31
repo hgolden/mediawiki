@@ -474,7 +474,7 @@ class InfoAction extends FormlessAction {
 		$pageInfo['header-basic'][] = [
 			// Messages: pageinfo-robot-index, pageinfo-robot-noindex
 			$this->msg( 'pageinfo-robot-policy' ),
-			$this->msg( "pageinfo-robot-${policy['index']}" )
+			$this->msg( "pageinfo-robot-{$policy['index']}" )
 		];
 
 		$unwatchedPageThreshold = $config->get( MainConfigNames::UnwatchedPageThreshold );
@@ -938,17 +938,10 @@ class InfoAction extends FormlessAction {
 				$id = $title->getArticleID();
 
 				$dbr = $this->loadBalancer->getConnectionRef( DB_REPLICA );
-				$dbrWatchlist = $this->loadBalancer->getConnectionRef(
-					DB_REPLICA,
-					[ 'watchlist' ]
-				);
-				$setOpts += Database::getCacheSetOptions( $dbr, $dbrWatchlist );
+				$setOpts += Database::getCacheSetOptions( $dbr );
 
-				$tables = [ 'revision' ];
 				$field = 'rev_actor';
 				$pageField = 'rev_page';
-				$tsField = 'rev_timestamp';
-				$joins = [];
 
 				$watchedItemStore = $this->watchedItemStore;
 
@@ -964,55 +957,47 @@ class InfoAction extends FormlessAction {
 				}
 
 				// Total number of edits
-				$edits = (int)$dbr->selectField(
-					'revision',
-					'COUNT(*)',
-					[ 'rev_page' => $id ],
-					$fname
-				);
+				$edits = (int)$dbr->newSelectQueryBuilder()
+					->select( 'COUNT(*)' )
+					->from( 'revision' )
+					->where( [ 'rev_page' => $id ] )
+					->caller( $fname )
+					->fetchField();
 				$result['edits'] = $edits;
 
 				// Total number of distinct authors
 				if ( $config->get( MainConfigNames::MiserMode ) ) {
 					$result['authors'] = 0;
 				} else {
-					$result['authors'] = (int)$dbr->selectField(
-						$tables,
-						"COUNT(DISTINCT $field)",
-						[ $pageField => $id ],
-						$fname,
-						[],
-						$joins
-					);
+					$result['authors'] = (int)$dbr->newSelectQueryBuilder()
+						->select( "COUNT(DISTINCT $field)" )
+						->from( 'revision' )
+						->where( [ $pageField => $id ] )
+						->caller( $fname )
+						->fetchField();
 				}
 
 				// "Recent" threshold defined by RCMaxAge setting
 				$threshold = $dbr->timestamp( time() - $config->get( MainConfigNames::RCMaxAge ) );
 
 				// Recent number of edits
-				$edits = (int)$dbr->selectField(
-					'revision',
-					'COUNT(rev_page)',
-					[
-						'rev_page' => $id,
-						"rev_timestamp >= " . $dbr->addQuotes( $threshold )
-					],
-					$fname
-				);
+				$edits = (int)$dbr->newSelectQueryBuilder()
+					->select( 'COUNT(rev_page)' )
+					->from( 'revision' )
+					->where( [ 'rev_page' => $id ] )
+					->andWhere( [ "rev_timestamp >= " . $dbr->addQuotes( $threshold ) ] )
+					->caller( $fname )
+					->fetchField();
 				$result['recent_edits'] = $edits;
 
 				// Recent number of distinct authors
-				$result['recent_authors'] = (int)$dbr->selectField(
-					$tables,
-					"COUNT(DISTINCT $field)",
-					[
-						$pageField => $id,
-						"$tsField >= " . $dbr->addQuotes( $threshold )
-					],
-					$fname,
-					[],
-					$joins
-				);
+				$result['recent_authors'] = (int)$dbr->newSelectQueryBuilder()
+					->select( "COUNT(DISTINCT $field)" )
+					->from( 'revision' )
+					->where( [ $pageField => $id ] )
+					->andWhere( [ 'rev_timestamp >= ' . $dbr->addQuotes( $threshold ) ] )
+					->caller( $fname )
+					->fetchField();
 
 				// Subpages (if enabled)
 				if ( $this->namespaceInfo->hasSubpages( $title->getNamespace() ) ) {
@@ -1022,21 +1007,20 @@ class InfoAction extends FormlessAction {
 
 					// Subpages of this page (redirects)
 					$conds['page_is_redirect'] = 1;
-					$result['subpages']['redirects'] = (int)$dbr->selectField(
-						'page',
-						'COUNT(page_id)',
-						$conds,
-						$fname
-					);
-
+					$result['subpages']['redirects'] = (int)$dbr->newSelectQueryBuilder()
+						->select( 'COUNT(page_id)' )
+						->from( 'page' )
+						->where( $conds )
+						->caller( $fname )
+						->fetchField();
 					// Subpages of this page (non-redirects)
 					$conds['page_is_redirect'] = 0;
-					$result['subpages']['nonredirects'] = (int)$dbr->selectField(
-						'page',
-						'COUNT(page_id)',
-						$conds,
-						$fname
-					);
+					$result['subpages']['nonredirects'] = (int)$dbr->newSelectQueryBuilder()
+						->select( 'COUNT(page_id)' )
+						->from( 'page' )
+						->where( $conds )
+						->caller( $fname )
+						->fetchField();
 
 					// Subpages of this page (total)
 					$result['subpages']['total'] = $result['subpages']['redirects']
@@ -1047,20 +1031,20 @@ class InfoAction extends FormlessAction {
 				if ( $config->get( MainConfigNames::MiserMode ) ) {
 					$result['transclusion']['to'] = 0;
 				} else {
-					$result['transclusion']['to'] = (int)$dbr->selectField(
-						'templatelinks',
-						'COUNT(tl_from)',
-						$this->linksMigration->getLinksConditions( 'templatelinks', $title ),
-						$fname
-					);
+					$result['transclusion']['to'] = (int)$dbr->newSelectQueryBuilder()
+						->select( 'COUNT(tl_from)' )
+						->from( 'templatelinks' )
+						->where( $this->linksMigration->getLinksConditions( 'templatelinks', $title ) )
+						->caller( $fname )
+						->fetchField();
 				}
 
-				$result['transclusion']['from'] = (int)$dbr->selectField(
-					'templatelinks',
-					'COUNT(*)',
-					[ 'tl_from' => $title->getArticleID() ],
-					$fname
-				);
+				$result['transclusion']['from'] = (int)$dbr->newSelectQueryBuilder()
+					->select( 'COUNT(*)' )
+					->from( 'templatelinks' )
+					->where( [ 'tl_from' => $title->getArticleID() ] )
+					->caller( $fname )
+					->fetchField();
 
 				return $result;
 			}

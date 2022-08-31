@@ -1,5 +1,6 @@
 <?php
 
+use MediaWiki\MainConfigNames;
 use Wikimedia\Rdbms\ILoadBalancer;
 use Wikimedia\Rdbms\LBFactory;
 
@@ -11,9 +12,8 @@ use Wikimedia\Rdbms\LBFactory;
  */
 class LockManagerGroupIntegrationTest extends MediaWikiIntegrationTestCase {
 	public function testWgLockManagers() {
-		$this->setMwGlobals( 'wgLockManagers',
+		$this->overrideConfigValue( MainConfigNames::LockManagers,
 			[ [ 'name' => 'a', 'class' => 'b' ], [ 'name' => 'c', 'class' => 'd' ] ] );
-		$this->getServiceContainer()->resetServiceForTesting( 'LockManagerGroupFactory' );
 
 		$lmg = $this->getServiceContainer()->getLockManagerGroupFactory()->getLockManagerGroup();
 		$domain = WikiMap::getCurrentWikiDbDomain()->getId();
@@ -27,8 +27,7 @@ class LockManagerGroupIntegrationTest extends MediaWikiIntegrationTestCase {
 	}
 
 	public function testSingletonFalse() {
-		$this->setMwGlobals( 'wgLockManagers', [ [ 'name' => 'a', 'class' => 'b' ] ] );
-		$this->getServiceContainer()->resetServiceForTesting( 'LockManagerGroupFactory' );
+		$this->overrideConfigValue( MainConfigNames::LockManagers, [ [ 'name' => 'a', 'class' => 'b' ] ] );
 
 		$this->assertSame(
 			WikiMap::getCurrentWikiDbDomain()->getId(),
@@ -40,8 +39,7 @@ class LockManagerGroupIntegrationTest extends MediaWikiIntegrationTestCase {
 	}
 
 	public function testSingletonNull() {
-		$this->setMwGlobals( 'wgLockManagers', [ [ 'name' => 'a', 'class' => 'b' ] ] );
-		$this->getServiceContainer()->resetServiceForTesting( 'LockManagerGroupFactory' );
+		$this->overrideConfigValue( MainConfigNames::LockManagers, [ [ 'name' => 'a', 'class' => 'b' ] ] );
 
 		$this->assertSame(
 			WikiMap::getCurrentWikiDbDomain()->getId(),

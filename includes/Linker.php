@@ -27,6 +27,7 @@ use MediaWiki\MediaWikiServices;
 use MediaWiki\Permissions\Authority;
 use MediaWiki\Revision\RevisionRecord;
 use Wikimedia\IPUtils;
+use Wikimedia\Rdbms\SelectQueryBuilder;
 
 /**
  * Some internal bits split of from Skin.php. These functions are used
@@ -298,7 +299,7 @@ class Linker {
 	 */
 	public static function makeImageLink( Parser $parser, LinkTarget $title,
 		$file, $frameParams = [], $handlerParams = [], $time = false,
-		$query = "", $widthOption = null
+		$query = '', $widthOption = null
 	) {
 		$title = Title::newFromLinkTarget( $title );
 		$res = null;
@@ -313,7 +314,7 @@ class Linker {
 		}
 
 		if ( $file && !$file->allowInlineDisplay() ) {
-			wfDebug( __METHOD__ . ': ' . $title->getPrefixedDBkey() . " does not allow inline display" );
+			wfDebug( __METHOD__ . ': ' . $title->getPrefixedDBkey() . ' does not allow inline display' );
 			return self::link( $title );
 		}
 
@@ -574,7 +575,7 @@ class Linker {
 	 */
 	public static function makeThumbLinkObj(
 		LinkTarget $title, $file, $label = '', $alt = '', $align = null,
-		$params = [], $framed = false, $manualthumb = ""
+		$params = [], $framed = false, $manualthumb = ''
 	) {
 		$frameParams = [
 			'alt' => $alt,
@@ -607,7 +608,7 @@ class Linker {
 	 */
 	public static function makeThumbLink2(
 		LinkTarget $title, $file, $frameParams = [], $handlerParams = [],
-		$time = false, $query = "", array $classes = [], ?Parser $parser = null
+		$time = false, $query = '', array $classes = [], ?Parser $parser = null
 	) {
 		$exists = $file && $file->exists();
 
@@ -744,19 +745,20 @@ class Linker {
 			$params = self::getImageLinkMTOParams( $frameParams, $query, $parser ) + $params;
 			$s .= $thumb->toHtml( $params );
 			if ( isset( $frameParams['framed'] ) ) {
-				$zoomIcon = "";
+				$zoomIcon = '';
 			} else {
 				$zoomIcon = Html::rawElement( 'div', [ 'class' => 'magnify' ],
 					Html::rawElement( 'a', [
 						'href' => $url,
 						'class' => 'internal',
-						'title' => wfMessage( 'thumbnail-more' )->text() ],
-						"" ) );
+						'title' => wfMessage( 'thumbnail-more' )->text(),
+					] )
+				);
 			}
 		}
 
 		if ( $enableLegacyMediaDOM ) {
-			$s .= '  <div class="thumbcaption">' . $zoomIcon . $frameParams['caption'] . "</div></div></div>";
+			$s .= '  <div class="thumbcaption">' . $zoomIcon . $frameParams['caption'] . '</div></div></div>';
 			return str_replace( "\n", ' ', $s );
 		}
 
@@ -1017,7 +1019,7 @@ class Linker {
 		$linktype = '', $attribs = [], $title = null
 	) {
 		global $wgTitle;
-		$class = "external";
+		$class = 'external';
 		if ( $linktype ) {
 			$class .= " $linktype";
 		}
@@ -1036,7 +1038,7 @@ class Linker {
 		$newRel = Parser::getExternalLinkRel( $url, $title );
 		if ( !isset( $attribs['rel'] ) || $attribs['rel'] === '' ) {
 			$attribs['rel'] = $newRel;
-		} elseif ( $newRel !== '' ) {
+		} elseif ( $newRel !== null ) {
 			// Merge the rel attributes.
 			$newRels = explode( ' ', $newRel );
 			$oldRels = explode( ' ', $attribs['rel'] );
@@ -1490,7 +1492,7 @@ class Linker {
 				# check for .. subpage backlinks
 				$dotdotcount = 0;
 				$nodotdot = $target;
-				while ( str_starts_with( $nodotdot, "../" ) ) {
+				while ( str_starts_with( $nodotdot, '../' ) ) {
 					++$dotdotcount;
 					$nodotdot = substr( $nodotdot, 3 );
 				}
@@ -1676,7 +1678,7 @@ class Linker {
 				'class' => 'toctogglelabel',
 			] )
 			. '</span>'
-			. "</div>"
+			. '</div>'
 			. $toc
 			. "</ul>\n</div>\n";
 	}
@@ -1858,18 +1860,16 @@ class Linker {
 
 		// Up to the value of $wgShowRollbackEditCount revisions are counted
 		$revQuery = MediaWikiServices::getInstance()->getRevisionStore()->getQueryInfo();
-		$res = $dbr->select(
-			$revQuery['tables'],
-			[ 'rev_user_text' => $revQuery['fields']['rev_user_text'], 'rev_deleted' ],
-			[ 'rev_page' => $revRecord->getPageId() ],
-			__METHOD__,
-			[
-				'USE INDEX' => [ 'revision' => 'rev_page_timestamp' ],
-				'ORDER BY' => [ 'rev_timestamp DESC', 'rev_id DESC' ],
-				'LIMIT' => $showRollbackEditCount + 1
-			],
-			$revQuery['joins']
-		);
+		$res = $dbr->newSelectQueryBuilder()
+			->select( [ 'rev_user_text' => $revQuery['fields']['rev_user_text'], 'rev_deleted' ] )
+			->tables( $revQuery['tables'] )
+			->where( [ 'rev_page' => $revRecord->getPageId() ] )
+			->joinConds( $revQuery['joins'] )
+			->useIndex( [ 'revision' => 'rev_page_timestamp' ] )
+			->orderBy( [ 'rev_timestamp', 'rev_id' ], SelectQueryBuilder::SORT_DESC )
+			->limit( $showRollbackEditCount + 1 )
+			->caller( __METHOD__ )
+			->fetchResultSet();
 
 		$revUser = $revRecord->getUser( RevisionRecord::RAW );
 		$revUserText = $revUser ? $revUser->getName() : '';

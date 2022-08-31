@@ -573,7 +573,7 @@ class ApiParse extends ApiBase {
 		}
 		if ( isset( $prop['sections'] ) ) {
 			$result_array['sections'] = $p_result->getSections();
-			$result_array['hidetoc'] = !$p_result->getTOCHTML();
+			$result_array['showtoc'] = (bool)$p_result->getTOCHTML();
 		}
 		if ( isset( $prop['parsewarnings'] ) ) {
 			$result_array['parsewarnings'] = $p_result->getWarnings();
@@ -850,7 +850,7 @@ class ApiParse extends ApiBase {
 				$summary = $params['sectiontitle'];
 			}
 			if ( $summary !== '' ) {
-				$summary = wfMessage( 'newsectionsummary' )
+				$summary = $this->msg( 'newsectionsummary' )
 					->rawParams( $this->parser->stripSectionName( $summary ) )
 					->inContentLanguage()->text();
 			}
@@ -895,15 +895,13 @@ class ApiParse extends ApiBase {
 		$lb = $this->linkBatchFactory->newLinkBatch();
 		$lb->setArray( [ NS_CATEGORY => $links ] );
 		$db = $this->getDB();
-		$res = $db->select( [ 'page', 'page_props' ],
-			[ 'page_title', 'pp_propname' ],
-			$lb->constructSet( 'page', $db ),
-			__METHOD__,
-			[],
-			[ 'page_props' => [
-				'LEFT JOIN', [ 'pp_propname' => 'hiddencat', 'pp_page = page_id' ]
-			] ]
-		);
+		$res = $db->newSelectQueryBuilder()
+			->select( [ 'page_title', 'pp_propname' ] )
+			->from( 'page' )
+			->where( $lb->constructSet( 'page', $db ) )
+			->leftJoin( 'page_props', null, [ 'pp_propname' => 'hiddencat', 'pp_page = page_id' ] )
+			->caller( __METHOD__ )
+			->fetchResultSet();
 		$hiddencats = [];
 		foreach ( $res as $row ) {
 			$hiddencats[$row->page_title] = isset( $row->pp_propname );

@@ -72,6 +72,7 @@ class CoreParserFunctions {
 			'numberingroup', 'numberofedits', 'language',
 			'padleft', 'padright', 'anchorencode', 'defaultsort', 'filepath',
 			'pagesincategory', 'pagesize', 'protectionlevel', 'protectionexpiry',
+			'namespace',
 			'namespacee', 'namespacenumber', 'talkspace', 'talkspacee',
 			'subjectspace', 'subjectspacee', 'pagename', 'pagenamee',
 			'fullpagename', 'fullpagenamee', 'rootpagename', 'rootpagenamee',
@@ -85,11 +86,6 @@ class CoreParserFunctions {
 			$parser->setFunctionHook( $func, [ __CLASS__, $func ], Parser::SFH_NO_HASH );
 		}
 
-		$parser->setFunctionHook(
-			'namespace',
-			[ __CLASS__, 'mwnamespace' ],
-			Parser::SFH_NO_HASH
-		);
 		$parser->setFunctionHook( 'int', [ __CLASS__, 'intFunction' ], Parser::SFH_NO_HASH );
 		$parser->setFunctionHook( 'special', [ __CLASS__, 'special' ] );
 		$parser->setFunctionHook( 'speciale', [ __CLASS__, 'speciale' ] );
@@ -619,18 +615,32 @@ class CoreParserFunctions {
 	/**
 	 * Given a title, return the namespace name that would be given by the
 	 * corresponding magic word
-	 * Note: function name changed to "mwnamespace" rather than "namespace"
-	 * to not break PHP 5.3
 	 * @param Parser $parser
 	 * @param string|null $title
 	 * @return mixed|string
+	 * @since 1.39
 	 */
-	public static function mwnamespace( $parser, $title = null ) {
+	public static function namespace( $parser, $title = null ) {
 		$t = Title::newFromText( $title );
 		if ( $t === null ) {
 			return '';
 		}
 		return str_replace( '_', ' ', $t->getNsText() );
+	}
+
+	/**
+	 * Given a title, return the namespace name that would be given by the
+	 * corresponding magic word.
+	 * @note This function corresponded to the `namespace` parser function
+	 * and magic variable, but `namespace` was a reserved word before PHP 7.
+	 * @param Parser $parser
+	 * @param string|null $title
+	 * @return mixed|string
+	 * @deprecated Use CoreParserFunctions::namespace() instead.
+	 */
+	public static function mwnamespace( $parser, $title = null ) {
+		wfDeprecated( __METHOD__, '1.39' );
+		return self::namespace( $parser, $title );
 	}
 
 	public static function namespacee( $parser, $title = null ) {
@@ -806,11 +816,11 @@ class CoreParserFunctions {
 	 * can't be called too many times per page.
 	 * @param Parser $parser
 	 * @param string $name
-	 * @param string|null $arg1
-	 * @param string|null $arg2
+	 * @param string $arg1
+	 * @param string $arg2
 	 * @return string
 	 */
-	public static function pagesincategory( $parser, $name = '', $arg1 = null, $arg2 = null ) {
+	public static function pagesincategory( $parser, $name = '', $arg1 = '', $arg2 = '' ) {
 		static $magicWords = null;
 		if ( $magicWords === null ) {
 			$magicWords = $parser->getMagicWordFactory()->newArray( [
@@ -1135,9 +1145,10 @@ class CoreParserFunctions {
 			return '';
 		}
 		$tagName = strtolower( trim( $frame->expand( array_shift( $args ) ) ) );
+		$processNowiki = $parser->tagNeedsNowikiStrippedInTagPF( $tagName ) ? PPFrame::PROCESS_NOWIKI : 0;
 
 		if ( count( $args ) ) {
-			$inner = $frame->expand( array_shift( $args ) );
+			$inner = $frame->expand( array_shift( $args ), $processNowiki );
 		} else {
 			$inner = null;
 		}

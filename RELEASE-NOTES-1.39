@@ -14,6 +14,7 @@ See the file UPGRADE for more detailed per-version upgrade instructions from the
 oldest supported upgrading version, MediaWiki 1.31.
 
 Some specific notes for MediaWiki 1.39 upgrades are below:
+* (T278139) Drop PHP 7.3 support in MediaWiki 1.39; require 7.4.3 or higher.
 * …
 
 For notes on 1.38.x and older releases, see HISTORY.
@@ -24,6 +25,9 @@ For notes on 1.38.x and older releases, see HISTORY.
   $wgLocalFileRepo.
 * The DBO_SSL flag in $wgDBservers and $wgLBFactoryConf has been deprecated in
   favour of a boolean "ssl" parameter.
+* $wgMangleFlashPolicy is deprecated and is no longer functional. Users who are
+  somehow still using Flash as a browser extension will be exposed to CSRF
+  vulnerabilities.
 * …
 
 ==== New configuration ====
@@ -31,6 +35,15 @@ For notes on 1.38.x and older releases, see HISTORY.
 * $wgCopyUploadAllowOnWikiDomainConfig – Configures if administrators can use
   the MediaWiki:Copyupload-allowed-domains system message to define which
   domains can be used with the upload-by-url tool.
+* $wgLBFactoryConf['configCallback'] can be set to a callback function that
+  returns an array with keys to update in $wgLBFactoryConf. This can be used
+  to update the database configuration on the fly, e.g. to take replica hosts
+  out of rotation.
+* $wgCdnMatchParameterOrder can be set to false if MediaWiki is behind a CDN
+  that re-orders query parameters. This will make the code that matches request
+  URLs to canonical CDN URLs insensitive to parameter order.
+* $wgMultiShardSiteStats – split site_stats across multiple rows.
+  Only useful for very large, heavily edited wikis. (T306589)
 * …
 
 ==== Changed configuration ====
@@ -78,12 +91,17 @@ For notes on 1.38.x and older releases, see HISTORY.
 * …
 
 === New developer features in 1.39 ===
+* JsonValidateSaveHook has been added to allow extensions to set additional
+  pre-save validations for specific JSON pages (T313254)
+* Added 'PermissionErrorAudit' hook, enabling extensions to audit permission
+  errors on specfic actions. For instance account registration failed attempts
+  due to a block (T306018).
 * …
 
 === External library changes in 1.39 ===
 
 ==== New external libraries ====
-* Added Codex v0.1.0-alpha.8
+* Added Codex v0.1.0-alpha.10. This replaces the now deprecated wvui library.
 * …
 
 ===== New development-only external libraries =====
@@ -91,19 +109,22 @@ For notes on 1.38.x and older releases, see HISTORY.
 * …
 
 ==== Changed external libraries ====
-* Updated OOUI from v0.43.2 to v0.44.1.
+* Updated jQuery from v3.6.0 to v3.6.1.
+* Updated OOUI from v0.43.2 to v0.44.3.
 * Updated composer/semver from 3.2.6 to 3.3.2.
-* Updated vue/compat from 3.2.23 to 3.2.31.
-* Updated wikimedia/minify from 2.2.6 to 2.3.0.
-* Updated wikimedia/ip-set from 3.0.0 to 3.1.0.
-* Updated wikimedia/xmp-reader from 0.8.1 to 0.8.3.
-* Updated wikimedia/timestamp from 3.0.0 to 4.0.0.
 * Updated symfony/polyfill-php73 from 1.25.0 to 1.26.0.
 * Updated symfony/polyfill-php80 from 1.25.0 to 1.26.0.
 * Updated symfony/yaml from 5.4.3 to 5.4.10.
+* Updated vue/compat from 3.2.23 to 3.2.37.
 * Updated wikimedia/base-convert from 2.0.1 to 2.0.2.
+* Updated wikimedia/ip-set from 3.0.0 to 3.1.0.
+* Updated wikimedia/minify from 2.2.6 to 2.3.0.
 * Updated wikimedia/php-session-serializer from 2.0.0 to 2.0.1.
-* Updated wikimedia/running-stat from 1.2.1 to 2.0.0.
+* Updated wikimedia/running-stat from 1.2.1 to 2.1.0.
+* Updated wikimedia/scoped-callback from 3.0.0 to 4.0.0.
+* Updated wikimedia/services from 2.0.1 to 3.0.0.
+* Updated wikimedia/timestamp from 3.0.0 to 4.0.0.
+* Updated wikimedia/xmp-reader from 0.8.1 to 0.8.3.
 * …
 
 ===== Changed development-only external libraries =====
@@ -114,6 +135,10 @@ For notes on 1.38.x and older releases, see HISTORY.
 * …
 
 === Bug fixes in 1.39 ===
+* (T314013) $wgExtraNamespaces no longer overrides canonical namespace names
+  specified in extension.json files. While this setting can still be used to
+  rename extension-defined namespaces, system administrators may need to run
+  namespaceDupes.php after upgrading.
 * …
 
 === Action API changes in 1.39 ===
@@ -129,9 +154,11 @@ MediaWiki supports over 350 languages. Many localisations are updated regularly.
 Below only new and removed languages are listed, as well as changes to languages
 because of Phabricator reports.
 
-* (T313200) Added language support for Rundi (Kirundi, rn). (Actually, it was
-  in Names.php and even used for a Wikipedia, but actual localization
-  was added only now.)
+* Actual localization was added for several languages, which were already
+  in Names.php and even used for a Wikipedia:
+** (T313200) Added language support for Rundi (Kirundi, rn).
+** (T310976) Added language support for Tumbuka (ChiTumbuka, tum).
+** (T314270) Added language support for Kanuri (kr).
 * (T313199) Added language support for Sylheti (syl).
 * (T311975) Added language support for Ghanaian Pidgin (gpe).
 * (T307080) Added language support for Okinawan (ryu).
@@ -139,10 +166,9 @@ because of Phabricator reports.
 * (T308813) Added language support for Nigerian Pidgin (pcm).
 * (T309763) Added language support for Tai Nüa (tdd).
 * (T310040) Added language support for Fante (fat).
-* (T310976) Added language support for Tumbuka (tum). (Actually, it was
-  in Names.php and even used for a Wikipedia, but actual localization
-  was added only now.)
 * (T311034) Added language support for Campidanese Sardinian (sro).
+* (T315406) Fix the autonym of the Iñupiaq language to "Iñupiatun".
+* (T315677) Removed French fallback from the Fula language (ff).
 * (T304920) In Swahili, The "Media" namespace is now "Media", as in English,
   and the "File" namespace is now "Faili". The old name of the "File" namespace
   was "Picha", and it's kept for backwards compatibility. If you manage a wiki
@@ -222,6 +248,9 @@ because of Phabricator reports.
     SkinTemplateNavigation::Universal:
      - SkinTemplateNavigation::SpecialPage
      - SkinTemplateNavigation
+  - The mediawiki.skinning.content.externallinks module, which was
+    deprecated in 1.36 has been removed. Skins that still rely on it
+    will lose the icon styling of external links by type.
 * Experimental wiki farm support: Automatic detection of the requested site
   within a wiki farm based on the requested domain has been removed.
   Use the MW_WIKI_NAME environment variable to specify the name of the site
@@ -250,6 +279,8 @@ because of Phabricator reports.
 * In HTMLForm HTMLAutoCompleteSelectFields, the parameters 'autocomplete' and
   'autocomplete-messages', which were deprecated in MediaWiki 1.29, were
   removed. Instead, use 'autocomplete-data' and 'autocomplete-data-messages'.
+* The global $wgParser, deprecated in 1.32, was removed. Use
+  MediaWikiServices::getInstance()->getParser() instead.
 * ParserOutput::setText will now set the ParserOutput's text to null if
   given null. Previously it did nothing if given null.
 * The default value for the first argument to the ParserOutput constructor
@@ -351,8 +382,38 @@ because of Phabricator reports.
   UnblockUser instead.
 * wfLocalFile() and wfFindFile(), deprecated in 1.34, have been removed.
 * Maintenance script resetUserTokens.php, deprecated in 1.27, has been removed.
-* Database::doInsert() has been removed without deprecation as it's not used
-  outside core. Users should override SqlPlatform::insertSqlText() instead.
+* These methods in Database have been removed without deprecation as they are
+  not used outside core. Users should override corresponding methods in
+  SQLPlatform instead:
+  - Database::doInsert -> SQLPlatform::insertSqlText
+  - Database::doDropTable -> SQLPlatform::dropTableSqlText
+  - Database::doRollback -> SQLPlatform::rollbackSqlText
+  - Database::doSavepoint -> SQLPlatform::savepointSqlText
+  - Database::doReleaseSavepoint -> SQLPlatform::releaseSavepointSqlText
+  - Database::doRollbackToSavepoint -> SQLPlatform::rollbackToSavepointSqlText
+* The following protected methods of Database class have been removed without
+  deprecation as they are not used outside core. Users should call
+  corresponding methods in SQLPlatform:
+  - Database::makeInsertLists -> SQLPlatform::makeInsertLists
+  - Database::isFlagInOptions -> SQLPlatform::isFlagInOptions
+  - Database::normalizeOptions -> SQLPlatform::normalizeOptions
+  - Database::fieldNameWithAlias -> SQLPlatform::fieldNameWithAlias
+  - Database::isTransactableQuery -> SQLPlatform::isTransactableQuery
+* $wgCanonicalNamespaceNames no longer includes custom namespaces defined using
+  $wgExtraNamespaces. Extensions should use the NamespaceInfo service instead
+  of accessing this configuration setting directly.
+* The following hook, deprecated in 1.35, has been removed:
+     - ParserGetVariableValueVarCache: ParserGetVariableValueVarCacheHook
+* The $variableCache parameter to the ParserGetVariableValueSwitch hook is
+  no longer used; non-standard use of this parameter has been deprecated since
+  1.35.
+* These methods have been moved from IDatabase to IMaintainableDatabase:
+  - IDatabase::fieldExists -> IMaintainableDatabase::fieldExists
+  - IDatabase::indexExists -> IMaintainableDatabase::indexExists
+  - IDatabase::tableExists -> IMaintainableDatabase::tableExists
+* DBConnRef doesn't accept live connection in constructor anymore.
+  Only parameters for getting connection should be provided.
+* IDatabase::getTopologyRootPrimary() was removed.
 * …
 
 === Deprecations in 1.39 ===
@@ -442,6 +503,9 @@ because of Phabricator reports.
   warnings.
 * Article::viewRedirect(), deprecated in 1.30, now emits deprecation warnings.
 * Parser::getFreshParser() is deprecated, use ParserFactory::getInstance().
+* CoreParserFunctions::mwnamespace() is deprecated and emits deprecation
+  warnings, use CoreParserFunctions::namespace() instead.
+* Registering magic variables whose names include a colon is deprecated.
 * User::blockedFor(), deprecated in 1.35, now emits deprecation warnings.
 * Access to previously public properties AbstractBlock::$mExpiry,
   AbstractBlock::$mHideName, AbstractBlock::$mTimestamp, DatabaseBlock::$mAuto,
@@ -491,6 +555,9 @@ because of Phabricator reports.
   warnings.
 * Instantiating HTMLCacheUpdate class, deprecated in 1.34, now emits deprecation
   warnings.
+* ISQLPlatform::tableNames() (implemented by IDatabase) is soft deprecated.
+  None of the tableName*() functions should be used by most users;
+  if you absolutely must use raw SQL, write several tableName() calls instead.
 * …
 
 === Other changes in 1.39 ===
@@ -506,7 +573,7 @@ because of Phabricator reports.
 
 == Compatibility ==
 
-MediaWiki 1.39 requires PHP 7.3.19 or later and the following PHP extensions:
+MediaWiki 1.39 requires PHP 7.4.3 or later and the following PHP extensions:
 
 * ctype
 * dom
@@ -524,7 +591,7 @@ The supported versions are:
 
 * MariaDB 10.3 or higher
 * MySQL 5.7.0 or higher
-* PostgreSQL 9.4 or later
+* PostgreSQL 10 or later
 * SQLite 3.8.0 or later
 
 == Online documentation ==

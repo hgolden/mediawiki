@@ -143,7 +143,7 @@ class ApiFeedContributions extends ApiBase {
 			$this->dieWithError( 'apierror-sizediffdisabled' );
 		}
 
-		$msg = wfMessage( 'Contributions' )->inContentLanguage()->text();
+		$msg = $this->msg( 'Contributions' )->inContentLanguage()->text();
 		$feedTitle = $config->get( MainConfigNames::Sitename ) . ' - ' . $msg .
 			' [' . $config->get( MainConfigNames::LanguageCode ) . ']';
 
@@ -268,7 +268,7 @@ class ApiFeedContributions extends ApiBase {
 	 * @return string
 	 */
 	protected function feedItemDesc( RevisionRecord $revision ) {
-		$msg = wfMessage( 'colon-separator' )->inContentLanguage()->text();
+		$msg = $this->msg( 'colon-separator' )->inContentLanguage()->text();
 		try {
 			$content = $revision->getContent( SlotRecord::MAIN );
 		} catch ( RevisionAccessException $e ) {
@@ -289,7 +289,7 @@ class ApiFeedContributions extends ApiBase {
 		$comment = $revision->getComment();
 
 		return '<p>' . htmlspecialchars( $this->feedItemAuthor( $revision ) ) . $msg .
-			htmlspecialchars( FeedItem::stripComment( $comment ? $comment->text : '' ) ) .
+			htmlspecialchars( FeedItem::stripComment( $comment->text ?? '' ) ) .
 			"</p>\n<hr />\n<div>" . $html . '</div>';
 	}
 

@@ -7,6 +7,7 @@ use Exception;
 use ExtensionRegistry;
 use FauxRequest;
 use InvalidArgumentException;
+use MediaWiki\MainConfigNames;
 use MediaWiki\ResourceLoader\Context;
 use MediaWiki\ResourceLoader\FileModule;
 use MediaWiki\ResourceLoader\ResourceLoader;
@@ -29,10 +30,7 @@ class ResourceLoaderTest extends ResourceLoaderTestCase {
 	protected function setUp(): void {
 		parent::setUp();
 
-		$this->setMwGlobals( [
-			'wgSkinLessVariablesImportPaths' => [],
-			'wgShowExceptionDetails' => true,
-		] );
+		$this->overrideConfigValue( MainConfigNames::ShowExceptionDetails, true );
 	}
 
 	/**
@@ -41,13 +39,12 @@ class ResourceLoaderTest extends ResourceLoaderTestCase {
 	 */
 	public function testServiceWiring() {
 		$ranHook = 0;
-		$this->setMwGlobals( 'wgHooks', [
-			'ResourceLoaderRegisterModules' => [
-				static function ( &$resourceLoader ) use ( &$ranHook ) {
-					$ranHook++;
-				}
-			]
-		] );
+		$this->setTemporaryHook(
+			'ResourceLoaderRegisterModules',
+			static function ( &$resourceLoader ) use ( &$ranHook ) {
+				$ranHook++;
+			}
+		);
 
 		$this->getServiceContainer()->getResourceLoader();
 
@@ -229,7 +226,7 @@ class ResourceLoaderTest extends ResourceLoaderTestCase {
 			],
 			[
 				'config' => [
-					'wgValidSkinNames' => [
+					MainConfigNames::ValidSkinNames => [
 						// Required to make Context::getSkin work
 						'example' => 'Example',
 					],
@@ -247,10 +244,8 @@ class ResourceLoaderTest extends ResourceLoaderTestCase {
 	 * @dataProvider provideMediaWikiVariablesCases
 	 */
 	public function testMediawikiVariablesDefault( array $config, array $importPaths, $skin, $expectedFile ) {
-		$this->setMwGlobals( $config );
+		$this->overrideConfigValues( $config );
 		$reset = ExtensionRegistry::getInstance()->setAttributeForTest( 'SkinLessImportPaths', $importPaths );
-		// Reset Skin::getSkinNames for Context
-		$this->getServiceContainer()->resetServiceForTesting( 'SkinFactory' );
 
 		$context = $this->getResourceLoaderContext( [ 'skin' => $skin ] );
 		$module = new FileModule( [
@@ -672,27 +667,30 @@ END
 
 	protected function getFailFerryMock( $getter = 'getScript' ) {
 		$mock = $this->getMockBuilder( ResourceLoaderTestModule::class )
-			->onlyMethods( [ $getter ] )
+					 ->onlyMethods( [ $getter, 'getName' ] )
 			->getMock();
 		$mock->method( $getter )->will( $this->throwException(
 			new Exception( 'Ferry not found' )
 		) );
+		$mock->method( 'getName' )->willReturn( __METHOD__ );
 		return $mock;
 	}
 
 	protected function getSimpleModuleMock( $script = '' ) {
 		$mock = $this->getMockBuilder( ResourceLoaderTestModule::class )
-			->onlyMethods( [ 'getScript' ] )
+					 ->onlyMethods( [ 'getScript', 'getName' ] )
 			->getMock();
 		$mock->method( 'getScript' )->willReturn( $script );
+		$mock->method( 'getName' )->willReturn( __METHOD__ );
 		return $mock;
 	}
 
 	protected function getSimpleStyleModuleMock( $styles = '' ) {
 		$mock = $this->getMockBuilder( ResourceLoaderTestModule::class )
-			->onlyMethods( [ 'getStyles' ] )
+					 ->onlyMethods( [ 'getStyles', 'getName' ] )
 			->getMock();
 		$mock->method( 'getStyles' )->willReturn( [ '' => $styles ] );
+		$mock->method( 'getName' )->willReturn( __METHOD__ );
 		return $mock;
 	}
 
@@ -962,10 +960,11 @@ END
 	 */
 	public function testMakeModuleResponseExtraHeaders() {
 		$module = $this->getMockBuilder( ResourceLoaderTestModule::class )
-			->onlyMethods( [ 'getPreloadLinks' ] )->getMock();
+					   ->onlyMethods( [ 'getPreloadLinks', 'getName' ] )->getMock();
 		$module->method( 'getPreloadLinks' )->willReturn( [
 			'https://example.org/script.js' => [ 'as' => 'script' ],
 		] );
+		$module->method( 'getName' )->willReturn( __METHOD__ );
 
 		$rl = new EmptyResourceLoader();
 		$context = $this->getResourceLoaderContext(
@@ -988,17 +987,19 @@ END
 
 	public function testMakeModuleResponseExtraHeadersMulti() {
 		$foo = $this->getMockBuilder( ResourceLoaderTestModule::class )
-			->onlyMethods( [ 'getPreloadLinks' ] )->getMock();
+			->onlyMethods( [ 'getPreloadLinks', 'getName' ] )->getMock();
 		$foo->method( 'getPreloadLinks' )->willReturn( [
 			'https://example.org/script.js' => [ 'as' => 'script' ],
 		] );
+		$foo->method( 'getName' )->willReturn( __METHOD__ );
 
 		$bar = $this->getMockBuilder( ResourceLoaderTestModule::class )
-			->onlyMethods( [ 'getPreloadLinks' ] )->getMock();
+			->onlyMethods( [ 'getPreloadLinks', 'getName' ] )->getMock();
 		$bar->method( 'getPreloadLinks' )->willReturn( [
 			'/example.png' => [ 'as' => 'image' ],
 			'/example.jpg' => [ 'as' => 'image' ],
 		] );
+		$bar->method( 'getName' )->willReturn( __METHOD__ );
 
 		$rl = new EmptyResourceLoader();
 		$context = $this->getResourceLoaderContext(
@@ -1063,6 +1064,24 @@ END
 		$rl->respond( $context );
 	}
 
+	public function testRespondMissingModule() {
+		$rl = $this->getMockBuilder( EmptyResourceLoader::class )
+			->onlyMethods( [
+				'measureResponseTime',
+				'tryRespondNotModified',
+				'sendResponseHeaders',
+			] )
+			->getMock();
+		$context = $this->getResourceLoaderContext(
+			[ 'modules' => 'unknown', 'only' => null ],
+			$rl
+		);
+
+		$this->expectOutputRegex( '/mw\.loader\.state.*"unknown": "missing"/s' );
+
+		$rl->respond( $context );
+	}
+
 	/**
 	 * Refuse requests for private modules.
 	 */
@@ -1088,12 +1107,17 @@ END
 	}
 
 	public function testRespondInternalFailures() {
-		$module = new ResourceLoaderTestModule( [ 'script' => 'foo();' ] );
+		$module = $this->getMockBuilder( ResourceLoaderTestModule::class )
+			->onlyMethods( [ 'getDefinitionSummary', 'enableModuleContentVersion' ] )
+			->getMock();
+		$module->method( 'enableModuleContentVersion' )
+			->willReturn( false );
+		$module->method( 'getDefinitionSummary' )
+			->willThrowException( new Exception( 'Version error' ) );
 		$rl = $this->getMockBuilder( EmptyResourceLoader::class )
 			->onlyMethods( [
 				'measureResponseTime',
 				'preloadModuleInfo',
-				'getCombinedVersion',
 				'tryRespondNotModified',
 				'makeModuleResponse',
 				'sendResponseHeaders',
@@ -1104,14 +1128,15 @@ END
 				return $module;
 			}
 		] );
-		$context = $this->getResourceLoaderContext( [ 'modules' => 'test' ], $rl );
+		$context = $this->getResourceLoaderContext(
+			[ 'modules' => 'test', 'debug' => 'false' ],
+			$rl
+		);
 		// Disable logging from outputErrorAndLog
 		$this->setLogger( 'exception', new \Psr\Log\NullLogger() );
 
 		$rl->expects( $this->once() )->method( 'preloadModuleInfo' )
 			->willThrowException( new Exception( 'Preload error' ) );
-		$rl->expects( $this->once() )->method( 'getCombinedVersion' )
-			->willThrowException( new Exception( 'Version error' ) );
 		$rl->expects( $this->once() )->method( 'makeModuleResponse' )
 			->with( $context, [ 'test' => $module ] )
 			->willReturn( 'foo;' );

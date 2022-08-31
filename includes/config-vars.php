@@ -1606,12 +1606,6 @@ $wgEnableSidebarCache = null;
 $wgSidebarCacheExpiry = null;
 
 /**
- * Config variable stub for the FooterLinkCacheExpiry setting, for use by phpdoc and IDEs.
- * @see MediaWiki\MainConfigSchema::FooterLinkCacheExpiry
- */
-$wgFooterLinkCacheExpiry = null;
-
-/**
  * Config variable stub for the UseGzip setting, for use by phpdoc and IDEs.
  * @see MediaWiki\MainConfigSchema::UseGzip
  */
@@ -1725,6 +1719,12 @@ $wgHTCPMulticastTTL = null;
  * @see MediaWiki\MainConfigSchema::UsePrivateIPs
  */
 $wgUsePrivateIPs = null;
+
+/**
+ * Config variable stub for the CdnMatchParameterOrder setting, for use by phpdoc and IDEs.
+ * @see MediaWiki\MainConfigSchema::CdnMatchParameterOrder
+ */
+$wgCdnMatchParameterOrder = null;
 
 /**
  * Config variable stub for the LanguageCode setting, for use by phpdoc and IDEs.
@@ -2017,6 +2017,7 @@ $wgEnableCanonicalServerLink = null;
 /**
  * Config variable stub for the MangleFlashPolicy setting, for use by phpdoc and IDEs.
  * @see MediaWiki\MainConfigSchema::MangleFlashPolicy
+ * @deprecated since 1.39; no longer has any effect
  */
 $wgMangleFlashPolicy = null;
 

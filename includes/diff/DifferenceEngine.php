@@ -992,6 +992,7 @@ class DifferenceEngine extends ContextSource {
 			}
 
 			$out->setRevisionId( $this->mNewid );
+			$out->setRevisionIsCurrent( $this->mNewRevisionRecord->isCurrent() );
 			$out->setRevisionTimestamp( $this->mNewRevisionRecord->getTimestamp() );
 			$out->setArticleFlag( true );
 
@@ -1020,7 +1021,11 @@ class DifferenceEngine extends ContextSource {
 					if ( $this->hookRunner->onDifferenceEngineRenderRevisionAddParserOutput(
 						$this, $out, $parserOutput, $wikiPage )
 					) {
+						$skinOptions = $this->getSkin()->getOptions();
+						$out->setSections( $parserOutput->getSections() );
 						$out->addParserOutput( $parserOutput, [
+							// phab:T311529 - diffs should respect skin
+							'injectTOC' => $skinOptions['toc'],
 							'enableSectionEditLinks' => $this->mNewRevisionRecord->isCurrent()
 								&& $this->getAuthority()->probablyCan(
 									'edit',

@@ -69,7 +69,7 @@ class MigrateLinksTable extends LoggedUpdateMaintenance {
 		}
 		$highestPageId = $highestPageId[0];
 		$pageId = 0;
-		while ( $pageId < $highestPageId ) {
+		while ( $pageId <= $highestPageId ) {
 			// Given the indexes and the structure of links tables,
 			// we need to split the update into batches of pages.
 			// Otherwise the queries will take a really long time in production and cause read-only.
@@ -86,8 +86,8 @@ class MigrateLinksTable extends LoggedUpdateMaintenance {
 		$batchSize = $this->getBatchSize();
 		$targetColumn = $mapping[$table]['target_id'];
 		$pageIdColumn = $mapping[$table]['page_id'];
-		// BETWEEN is not inclusive, let's add one more.
-		$highPageId = $lowPageId + $batchSize + 1;
+		// BETWEEN is inclusive, let's subtract one.
+		$highPageId = $lowPageId + $batchSize - 1;
 		$dbw = $this->getDB( DB_PRIMARY );
 		$updated = 0;
 
@@ -113,30 +113,20 @@ class MigrateLinksTable extends LoggedUpdateMaintenance {
 				"title on pages between $lowPageId and $highPageId\n" );
 			$id = MediaWikiServices::getInstance()->getLinkTargetLookup()->acquireLinkTargetId( $title, $dbw );
 			$conds = [
+				$targetColumn => null,
 				$mapping[$table]['ns'] => $ns,
 				$mapping[$table]['title'] => $titleString,
 				"$pageIdColumn BETWEEN $lowPageId AND $highPageId"
 			];
-			while ( true ) {
-				$dbw->update(
-					$table,
-					[ $targetColumn => $id ],
-					array_merge( [ $targetColumn => null ], $conds ),
-					__METHOD__,
-					[ 'LIMIT' => $batchSize ]
-				);
-				$updatedInThisBatch = $dbw->affectedRows();
-				$updated += $updatedInThisBatch;
-				$this->output( "Updated $updatedInThisBatch rows\n" );
-				// Sleep between batches for replication to catch up
-				MediaWikiServices::getInstance()->getDBLoadBalancerFactory()->waitForReplication();
-				$sleep = (int)$this->getOption( 'sleep', 0 );
-				if ( $sleep > 0 ) {
-					sleep( $sleep );
-				}
-				if ( !$updatedInThisBatch ) {
-					break;
-				}
+			$dbw->update( $table, [ $targetColumn => $id ], $conds, __METHOD__ );
+			$updatedInThisBatch = $dbw->affectedRows();
+			$updated += $updatedInThisBatch;
+			$this->output( "Updated $updatedInThisBatch rows\n" );
+			// Sleep between batches for replication to catch up
+			MediaWikiServices::getInstance()->getDBLoadBalancerFactory()->waitForReplication();
+			$sleep = (int)$this->getOption( 'sleep', 0 );
+			if ( $sleep > 0 ) {
+				sleep( $sleep );
 			}
 		}
 		return $updated;

@@ -351,10 +351,11 @@ class WikiPage implements Page, IDBAccessObject, PageRecord {
 	 * Return the tables, fields, and join conditions to be selected to create
 	 * a new page object.
 	 * @since 1.31
-	 * @return array With three keys:
-	 *   - tables: (string[]) to include in the `$table` to `IDatabase->select()`
-	 *   - fields: (string[]) to include in the `$vars` to `IDatabase->select()`
-	 *   - joins: (array) to include in the `$join_conds` to `IDatabase->select()`
+	 * @return array[] With three keys:
+	 *   - tables: (string[]) to include in the `$table` to `IDatabase->select()` or `SelectQueryBuilder::tables`
+	 *   - fields: (string[]) to include in the `$vars` to `IDatabase->select()` or `SelectQueryBuilder::fields`
+	 *   - joins: (array) to include in the `$join_conds` to `IDatabase->select()` or `SelectQueryBuilder::joinConds`
+	 * @phan-return array{tables:string[],fields:string[],joins:array}
 	 */
 	public static function getQueryInfo() {
 		$pageLanguageUseDB = MediaWikiServices::getInstance()->getMainConfig()->get(
@@ -1932,12 +1933,39 @@ class WikiPage implements Page, IDBAccessObject, PageRecord {
 	 * @return ParserOptions
 	 */
 	public function makeParserOptions( $context ) {
+		return self::makeParserOptionsFromTitleAndModel(
+			$this->getTitle(), $this->getContentModel(), $context
+		);
+	}
+
+	/**
+	 * Create canonical parser options for a given title and content model.
+	 * @internal
+	 * @param PageReference $pageRef
+	 * @param string $contentModel
+	 * @param IContextSource|UserIdentity|string $context See ::makeParserOptions
+	 * @return ParserOptions
+	 */
+	public static function makeParserOptionsFromTitleAndModel(
+		PageReference $pageRef, string $contentModel, $context
+	) {
 		$options = ParserOptions::newCanonical( $context );
 
-		if ( $this->getTitle()->isConversionTable() ) {
+		$title = Title::castFromPageReference( $pageRef );
+		if ( $title->isConversionTable() ) {
 			// @todo ConversionTable should become a separate content model, so
-			// we don't need special cases like this one.
+			// we don't need special cases like this one, but see T313455.
 			$options->disableContentConversion();
+		}
+		if ( $contentModel !== CONTENT_MODEL_WIKITEXT ) {
+			$textModelsToParse = MediaWikiServices::getInstance()->getMainConfig()->get(
+				MainConfigNames::TextModelsToParse );
+			if ( in_array( $contentModel, $textModelsToParse, true ) ) {
+				// @todo Content model should have a means to tweak options, so
+				// we don't need special cases like this one. (T313455)
+				// ( See TextContentHandler::fillParserOutput() )
+				$options->setSuppressTOC(); # T307691
+			}
 		}
 
 		return $options;

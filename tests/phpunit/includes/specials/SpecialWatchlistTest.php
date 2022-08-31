@@ -1,5 +1,6 @@
 <?php
 
+use MediaWiki\MainConfigNames;
 use Wikimedia\TestingAccessWrapper;
 
 /**
@@ -18,8 +19,8 @@ class SpecialWatchlistTest extends SpecialPageTestBase {
 			null
 		);
 
-		$this->setMwGlobals( [
-			'wgDefaultUserOptions' =>
+		$this->overrideConfigValues( [
+			MainConfigNames::DefaultUserOptions =>
 				[
 					'extendwatchlist' => 1,
 					'watchlistdays' => 3.0,
@@ -32,8 +33,9 @@ class SpecialWatchlistTest extends SpecialPageTestBase {
 					'watchlisthidecategorization' => 0,
 					'watchlistreloadautomatically' => 0,
 					'watchlistunwatchlinks' => 0,
+					'timecorrection' => '0'
 				],
-			'wgWatchlistExpiry' => true
+			MainConfigNames::WatchlistExpiry => true
 		] );
 	}
 

@@ -68,13 +68,8 @@ use WebRequest;
  *   are either synced to all remote data centres, or locally overwritten by another write
  *   that is.
  *
- * - Support BagOStuff::WRITE_SYNC flag. The data must writable with synchronous replication
- *   waited for, across all data centres. This is used when resetting or deleting a session,
- *   which must not be lost or overwritten by earlier or overlapping write actions.
- *
- * The SessionManager uses set() and delete() for write operations, which should by default
- * be synchronous in the local data centre, and replicate asynchronously to any others.
- * This behaviour can be overridden by the use of the WRITE_SYNC flag.
+ * The SessionManager uses `set()` and `delete()` for write operations, which should be
+ * synchronous in the local data centre, and replicate asynchronously to any others.
  *
  * @ingroup Session
  * @since 1.27
@@ -248,7 +243,7 @@ class SessionManager implements SessionManagerInterface {
 		$info = $this->getSessionInfoForRequest( $request );
 
 		if ( !$info ) {
-			$session = $this->getEmptySession( $request );
+			$session = $this->getInitialSession( $request );
 		} else {
 			$session = $this->getSessionFromInfo( $info, $request );
 		}
@@ -366,6 +361,21 @@ class SessionManager implements SessionManagerInterface {
 
 		// @phan-suppress-next-line PhanTypePossiblyInvalidDimOffset False positive
 		return $this->getSessionFromInfo( $infos[0], $request );
+	}
+
+	/**
+	 * Create a new session. Populate it with a default secret token, to avoid
+	 * a session replication race on a subsequent edit/save cycle (e.g. in
+	 * a multi-dc setup, ref https://phabricator.wikimedia.org/T279664#8139533).
+	 *
+	 * @param WebRequest|null $request Corresponding request. Any existing
+	 *  session associated with this WebRequest object will be overwritten.
+	 * @return Session
+	 */
+	private function getInitialSession( WebRequest $request = null ) {
+		$session = $this->getEmptySession( $request );
+		$session->getToken();
+		return $session;
 	}
 
 	public function invalidateSessionsForUser( User $user ) {
@@ -976,10 +986,10 @@ class SessionManager implements SessionManagerInterface {
 	 * @return string
 	 */
 	public function generateSessionId() {
-		do {
-			$id = \Wikimedia\base_convert( \MWCryptRand::generateHex( 40 ), 16, 32, 32 );
-			$key = $this->store->makeKey( 'MWSession', $id );
-		} while ( isset( $this->allSessionIds[$id] ) || is_array( $this->store->get( $key ) ) );
+		$id = \Wikimedia\base_convert( \MWCryptRand::generateHex( 40 ), 16, 32, 32 );
+		// Cache non-existence to avoid a later fetch
+		$key = $this->store->makeKey( 'MWSession', $id );
+		$this->store->set( $key, false, 0, BagOStuff::WRITE_CACHE_ONLY );
 		return $id;
 	}
 
